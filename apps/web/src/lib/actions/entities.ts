@@ -107,8 +107,9 @@ export async function updateAccount(id: string, data: Partial<z.infer<typeof acc
   const { householdId } = await getAuthContext();
   await db.update(accounts).set({
     ...data,
-    balance: data.balance?.toString(),
-    creditLimit: data.creditLimit?.toString(),
+    balance: data.balance !== undefined ? data.balance.toString() : undefined,
+    creditLimit: data.creditLimit !== undefined ? data.creditLimit?.toString() : undefined,
+    minimumPayment: data.minimumPayment !== undefined ? data.minimumPayment?.toString() : undefined,
     updatedAt: new Date(),
   }).where(and(eq(accounts.id, id), eq(accounts.householdId, householdId)));
   revalidatePath("/dashboard/accounts");

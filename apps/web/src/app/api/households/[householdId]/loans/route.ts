@@ -40,24 +40,26 @@ export async function GET(
         isNull(loans.deletedAt)
       ),
       orderBy: (l, { desc }) => [desc(l.createdAt)],
-      with: {
-        payments: true,
-      },
     });
 
-    const enriched = list.map((loan) => {
-      const principal = parseFloat(loan.principalAmount);
-      const remaining = parseFloat(loan.remainingBalance);
-      const paid = Math.max(0, principal - remaining);
-      const progressPct = principal > 0 ? ((paid / principal) * 100).toFixed(1) : "0.0";
+    const enriched = await Promise.all(
+      list.map(async (loan) => {
+        const principal = parseFloat(loan.principalAmount);
+        const remaining = parseFloat(loan.remainingBalance);
+        const paid = Math.max(0, principal - remaining);
+        const progressPct = principal > 0 ? ((paid / principal) * 100).toFixed(1) : "0.0";
+        const payments = await db.query.loanPayments.findMany({
+          where: eq(loanPayments.loanId, loan.id),
+        });
 
-      return {
-        ...loan,
-        principalPaid: paid,
-        progressPct: parseFloat(progressPct),
-        paymentsCount: loan.payments?.length ?? 0,
-      };
-    });
+        return {
+          ...loan,
+          principalPaid: paid,
+          progressPct: parseFloat(progressPct),
+          paymentsCount: payments.length,
+        };
+      })
+    );
 
     return NextResponse.json({ loans: enriched });
   } catch (error) {

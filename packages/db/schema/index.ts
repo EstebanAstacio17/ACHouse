@@ -1,3 +1,4 @@
+import { relations } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, integer, decimal, jsonb, pgEnum } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -167,6 +168,7 @@ export const projects = pgTable("projects", {
   status: projectStatusEnum("status").notNull().default("active"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
@@ -202,6 +204,7 @@ export const loans = pgTable("loans", {
   currency: text("currency").notNull().default("USD"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
@@ -245,3 +248,208 @@ export const auditLog = pgTable("audit_log", {
   newValues: jsonb("new_values"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─── Relations ───────────────────────────────────────────────────────────────
+
+export const householdsRelations = relations(households, ({ many }) => ({
+  members: many(householdMembers),
+  invitations: many(householdInvitations),
+  accounts: many(accounts),
+  categories: many(categories),
+  transactions: many(transactions),
+  businesses: many(businesses),
+  projects: many(projects),
+  loans: many(loans),
+  reconciliationEntries: many(reconciliationEntries),
+  auditLog: many(auditLog),
+}));
+
+export const householdMembersRelations = relations(householdMembers, ({ one, many }) => ({
+  household: one(households, {
+    fields: [householdMembers.householdId],
+    references: [households.id],
+  }),
+  incomeSources: many(memberIncomeSources),
+  transactions: many(transactions),
+  businessTransactions: many(businessTransactions),
+  projects: many(projects),
+  loansAsLender: many(loans, { relationName: "lender" }),
+  loansAsBorrower: many(loans, { relationName: "borrower" }),
+  auditLog: many(auditLog),
+}));
+
+export const householdInvitationsRelations = relations(householdInvitations, ({ one }) => ({
+  household: one(households, {
+    fields: [householdInvitations.householdId],
+    references: [households.id],
+  }),
+}));
+
+export const memberIncomeSourcesRelations = relations(memberIncomeSources, ({ one }) => ({
+  member: one(householdMembers, {
+    fields: [memberIncomeSources.memberId],
+    references: [householdMembers.id],
+  }),
+}));
+
+export const accountsRelations = relations(accounts, ({ one, many }) => ({
+  household: one(households, {
+    fields: [accounts.householdId],
+    references: [households.id],
+  }),
+  transactions: many(transactions, { relationName: "accountTransactions" }),
+  toTransactions: many(transactions, { relationName: "toAccountTransactions" }),
+  loans: many(loans),
+  reconciliationEntries: many(reconciliationEntries),
+}));
+
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
+  household: one(households, {
+    fields: [categories.householdId],
+    references: [households.id],
+  }),
+  transactions: many(transactions),
+  businessTransactions: many(businessTransactions),
+  projectTransactions: many(projectTransactions),
+}));
+
+export const transactionsRelations = relations(transactions, ({ one, many }) => ({
+  household: one(households, {
+    fields: [transactions.householdId],
+    references: [households.id],
+  }),
+  account: one(accounts, {
+    fields: [transactions.accountId],
+    references: [accounts.id],
+    relationName: "accountTransactions",
+  }),
+  toAccount: one(accounts, {
+    fields: [transactions.toAccountId],
+    references: [accounts.id],
+    relationName: "toAccountTransactions",
+  }),
+  member: one(householdMembers, {
+    fields: [transactions.memberId],
+    references: [householdMembers.id],
+  }),
+  category: one(categories, {
+    fields: [transactions.categoryId],
+    references: [categories.id],
+  }),
+  business: one(businesses, {
+    fields: [transactions.businessId],
+    references: [businesses.id],
+  }),
+  project: one(projects, {
+    fields: [transactions.projectId],
+    references: [projects.id],
+  }),
+  loanPayments: many(loanPayments),
+}));
+
+export const businessesRelations = relations(businesses, ({ one, many }) => ({
+  household: one(households, {
+    fields: [businesses.householdId],
+    references: [households.id],
+  }),
+  transactions: many(businessTransactions),
+  projects: many(projects),
+}));
+
+export const businessTransactionsRelations = relations(businessTransactions, ({ one }) => ({
+  business: one(businesses, {
+    fields: [businessTransactions.businessId],
+    references: [businesses.id],
+  }),
+  category: one(categories, {
+    fields: [businessTransactions.categoryId],
+    references: [categories.id],
+  }),
+  member: one(householdMembers, {
+    fields: [businessTransactions.memberId],
+    references: [householdMembers.id],
+  }),
+}));
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  household: one(households, {
+    fields: [projects.householdId],
+    references: [households.id],
+  }),
+  member: one(householdMembers, {
+    fields: [projects.memberId],
+    references: [householdMembers.id],
+  }),
+  business: one(businesses, {
+    fields: [projects.businessId],
+    references: [businesses.id],
+  }),
+  transactions: many(projectTransactions),
+}));
+
+export const projectTransactionsRelations = relations(projectTransactions, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectTransactions.projectId],
+    references: [projects.id],
+  }),
+  category: one(categories, {
+    fields: [projectTransactions.categoryId],
+    references: [categories.id],
+  }),
+}));
+
+export const loansRelations = relations(loans, ({ one, many }) => ({
+  household: one(households, {
+    fields: [loans.householdId],
+    references: [households.id],
+  }),
+  lenderMember: one(householdMembers, {
+    fields: [loans.lenderMemberId],
+    references: [householdMembers.id],
+    relationName: "lender",
+  }),
+  borrowerMember: one(householdMembers, {
+    fields: [loans.borrowerMemberId],
+    references: [householdMembers.id],
+    relationName: "borrower",
+  }),
+  account: one(accounts, {
+    fields: [loans.accountId],
+    references: [accounts.id],
+  }),
+  payments: many(loanPayments),
+}));
+
+export const loanPaymentsRelations = relations(loanPayments, ({ one }) => ({
+  loan: one(loans, {
+    fields: [loanPayments.loanId],
+    references: [loans.id],
+  }),
+  transaction: one(transactions, {
+    fields: [loanPayments.transactionId],
+    references: [transactions.id],
+  }),
+}));
+
+export const reconciliationEntriesRelations = relations(reconciliationEntries, ({ one }) => ({
+  household: one(households, {
+    fields: [reconciliationEntries.householdId],
+    references: [households.id],
+  }),
+  account: one(accounts, {
+    fields: [reconciliationEntries.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+export const auditLogRelations = relations(auditLog, ({ one }) => ({
+  household: one(households, {
+    fields: [auditLog.householdId],
+    references: [households.id],
+  }),
+  member: one(householdMembers, {
+    fields: [auditLog.memberId],
+    references: [householdMembers.id],
+  }),
+}));
+
