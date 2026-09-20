@@ -1,0 +1,13 @@
+{
+  "name": "@achouse/types",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

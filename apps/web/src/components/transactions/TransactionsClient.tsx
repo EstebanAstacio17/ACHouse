@@ -1,0 +1,746 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import {
+  Plus, Search, Filter, Download, ArrowUpCircle, ArrowDownCircle,
+  ArrowLeftRight, Pencil, Trash2, ChevronLeft, ChevronRight,
+  X, Check, Calendar, CreditCard, Tag, User, Paperclip, Repeat,
+  FileSpreadsheet, Eye, AlertCircle
+} from "lucide-react";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import * as XLSX from "xlsx";
+import { useToast } from "@/components/ui/ToastContext";
+
+// ─── Initial / Demo Data ───────────────────────────────────────────────────────
+export interface TransactionItem {
+  id: string;
+  description: string;
+  category: { id?: string; name: string; color: string } | null;
+  account: { id?: string; name: string };
+  toAccount?: { id?: string; name: string } | null;
+  member: { id?: string; displayName: string } | null;
+  type: "income" | "expense" | "transfer";
+  amount: string;
+  currency: string;
+  date: Date;
+  status: "cleared" | "pending" | "reconciled";
+  attachmentUrl?: string | null;
+  isRecurring?: boolean;
+  recurringFrequency?: string;
+  notes?: string;
+}
+
+const INITIAL_TRANSACTIONS: TransactionItem[] = [];
+
+const TYPE_CONFIG = {
+  income: { label: "Ingreso", color: "var(--color-income)", Icon: ArrowUpCircle, bg: "var(--color-income-dim)" },
+  expense: { label: "Egreso", color: "var(--color-expense)", Icon: ArrowDownCircle, bg: "var(--color-expense-dim)" },
+  transfer: { label: "Transferencia", color: "var(--color-transfer)", Icon: ArrowLeftRight, bg: "var(--color-transfer-dim)" },
+};
+
+const STATUS_CONFIG = {
+  cleared: { label: "Conciliado", color: "var(--color-income)" },
+  pending: { label: "Pendiente", color: "var(--color-warning)" },
+  reconciled: { label: "Reconciliado", color: "var(--accent)" },
+};
+
+const CATEGORIES_LIST = [
+  { id: "cat1", name: "Alimentación", color: "#6366f1" },
+  { id: "cat2", name: "Transporte", color: "#f97316" },
+  { id: "cat3", name: "Vivienda", color: "#8b5cf6" },
+  { id: "cat4", name: "Salud", color: "#06b6d4" },
+  { id: "cat5", name: "Entretenimiento", color: "#ec4899" },
+  { id: "cat6", name: "Salario", color: "#22c55e" },
+  { id: "cat7", name: "Negocios", color: "#14b8a6" },
+  { id: "cat8", name: "Deudas", color: "#f59e0b" },
+  { id: "cat9", name: "Servicios", color: "#84cc16" },
+];
+
+const ACCOUNTS_LIST = [
+  { id: "acc1", name: "Cuenta Corriente" },
+  { id: "acc2", name: "Tarjeta Visa" },
+  { id: "acc3", name: "Cuenta Ahorros" },
+  { id: "acc4", name: "Efectivo" },
+];
+
+const MEMBERS_LIST = [
+  { id: "mem1", displayName: "Ana M." },
+  { id: "mem2", displayName: "Carlos R." },
+  { id: "mem3", displayName: "Hogar" },
+];
+
+// ─── Transaction Form Modal ────────────────────────────────────────────────────
+function TransactionModal({
+  onClose,
+  onSave,
+  initialData,
+}: {
+  onClose: () => void;
+  onSave: (tx: Partial<TransactionItem>) => void;
+  initialData?: TransactionItem | null;
+}) {
+  const [form, setForm] = useState({
+    type: initialData?.type ?? "expense",
+    amount: initialData?.amount ?? "",
+    description: initialData?.description ?? "",
+    date: initialData ? format(initialData.date, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+    categoryId: initialData?.category?.id || (CATEGORIES_LIST.find(c => c.name === initialData?.category?.name)?.id ?? ""),
+    accountId: initialData?.account?.id || (ACCOUNTS_LIST.find(a => a.name === initialData?.account?.name)?.id ?? "acc1"),
+    toAccountId: initialData?.toAccount?.id || "acc3",
+    memberId: initialData?.member?.id || (MEMBERS_LIST.find(m => m.displayName === initialData?.member?.displayName)?.id ?? "mem1"),
+    status: initialData?.status ?? "cleared",
+    isRecurring: initialData?.isRecurring ?? false,
+    recurringFrequency: initialData?.recurringFrequency ?? "Mensual",
+    attachmentUrl: initialData?.attachmentUrl ?? "",
+    notes: initialData?.notes ?? "",
+  });
+
+  const [fileName, setFileName] = useState<string>("");
+
+  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setFileName(file.name);
+      const reader = new FileReader();
+      reader.onload = () => {
+        set("attachmentUrl", reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.amount || !form.description) return;
+
+    const selectedCat = CATEGORIES_LIST.find(c => c.id === form.categoryId);
+    const selectedAcc = ACCOUNTS_LIST.find(a => a.id === form.accountId);
+    const selectedToAcc = ACCOUNTS_LIST.find(a => a.id === form.toAccountId);
+    const selectedMem = MEMBERS_LIST.find(m => m.id === form.memberId);
+
+    onSave({
+      id: initialData?.id,
+      description: form.description,
+      type: form.type as any,
+      amount: parseFloat(form.amount).toFixed(2),
+      currency: "USD",
+      date: new Date(form.date),
+      status: form.status as any,
+      category: form.type === "transfer" ? null : (selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color } : null),
+      account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : { name: "Principal" },
+      toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
+      member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
+      isRecurring: form.isRecurring,
+      recurringFrequency: form.isRecurring ? form.recurringFrequency : undefined,
+      attachmentUrl: form.attachmentUrl || null,
+      notes: form.notes,
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="overlay"
+      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="modal" style={{ width: "min(580px, 95vw)", maxHeight: "90vh", overflowY: "auto" }}>
+        <div className="modal-header">
+          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>
+            {initialData ? "Editar Transacción" : "Nueva Transacción"}
+          </h2>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {/* Type Selector */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
+              {(["income", "expense", "transfer"] as const).map(t => {
+                const cfg = TYPE_CONFIG[t];
+                const active = form.type === t;
+                return (
+                  <button
+                    type="button"
+                    key={t}
+                    onClick={() => set("type", t)}
+                    style={{
+                      padding: "0.625rem",
+                      borderRadius: "var(--radius-md)",
+                      border: `1.5px solid ${active ? cfg.color : "var(--border-default)"}`,
+                      background: active ? cfg.bg : "transparent",
+                      color: active ? cfg.color : "var(--text-secondary)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.375rem",
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <cfg.Icon size={15} /> {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Amount */}
+            <div className="form-group">
+              <label className="label">Monto *</label>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: "0.875rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontWeight: 700 }}>$</span>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  style={{ paddingLeft: "2rem", fontSize: "1.125rem", fontWeight: 700 }}
+                  value={form.amount}
+                  onChange={e => set("amount", e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="form-group">
+              <label className="label">Descripción *</label>
+              <input
+                className="input"
+                required
+                placeholder="Ej: Supermercado, Salario quincenal, Gasolina..."
+                value={form.description}
+                onChange={e => set("description", e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              {/* Date */}
+              <div className="form-group">
+                <label className="label"><Calendar size={12} style={{ display: "inline", marginRight: 4 }} />Fecha *</label>
+                <input className="input" type="date" value={form.date} onChange={e => set("date", e.target.value)} />
+              </div>
+              {/* Status */}
+              <div className="form-group">
+                <label className="label">Estado</label>
+                <select className="input" value={form.status} onChange={e => set("status", e.target.value)}>
+                  <option value="cleared">Conciliado</option>
+                  <option value="pending">Pendiente</option>
+                  <option value="reconciled">Reconciliado</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              {/* Account */}
+              <div className="form-group">
+                <label className="label">
+                  <CreditCard size={12} style={{ display: "inline", marginRight: 4 }} />
+                  {form.type === "transfer" ? "Cuenta Origen *" : "Cuenta *"}
+                </label>
+                <select className="input" value={form.accountId} onChange={e => set("accountId", e.target.value)}>
+                  {ACCOUNTS_LIST.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* To Account (if transfer) or Category */}
+              {form.type === "transfer" ? (
+                <div className="form-group">
+                  <label className="label">
+                    <ArrowLeftRight size={12} style={{ display: "inline", marginRight: 4 }} />
+                    Cuenta Destino *
+                  </label>
+                  <select className="input" value={form.toAccountId} onChange={e => set("toAccountId", e.target.value)}>
+                    {ACCOUNTS_LIST.map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label className="label">
+                    <Tag size={12} style={{ display: "inline", marginRight: 4 }} />
+                    Categoría
+                  </label>
+                  <select className="input" value={form.categoryId} onChange={e => set("categoryId", e.target.value)}>
+                    <option value="">Sin categoría</option>
+                    {CATEGORIES_LIST.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Member */}
+            <div className="form-group">
+              <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
+              <select className="input" value={form.memberId} onChange={e => set("memberId", e.target.value)}>
+                {MEMBERS_LIST.map(m => (
+                  <option key={m.id} value={m.id}>{m.displayName}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Recurring Section */}
+            <div style={{ background: "var(--surface-2)", padding: "0.875rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <Repeat size={15} color="var(--color-brand-400)" />
+                  <span style={{ fontSize: "0.875rem", fontWeight: 600 }}>Transacción Recurrente</span>
+                </div>
+                <input
+                  type="checkbox"
+                  id="rec_check"
+                  checked={form.isRecurring}
+                  onChange={e => set("isRecurring", e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--color-brand-500)" }}
+                />
+              </div>
+              {form.isRecurring && (
+                <div style={{ marginTop: "0.75rem", display: "grid", gridTemplateColumns: "1fr", gap: "0.5rem" }}>
+                  <label className="label">Frecuencia de repetición</label>
+                  <select className="input" value={form.recurringFrequency} onChange={e => set("recurringFrequency", e.target.value)}>
+                    <option value="Semanal">Semanal</option>
+                    <option value="Quincenal">Quincenal</option>
+                    <option value="Mensual">Mensual</option>
+                    <option value="Anual">Anual</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Attachment Section */}
+            <div className="form-group">
+              <label className="label"><Paperclip size={12} style={{ display: "inline", marginRight: 4 }} />Comprobante / Recibo</label>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+                  <Paperclip size={13} /> {fileName ? "Cambiar Archivo" : "Subir Recibo (JPG/PNG/PDF)"}
+                  <input type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: "none" }} />
+                </label>
+                {fileName && <span style={{ fontSize: "0.75rem", color: "var(--color-brand-300)" }}>{fileName}</span>}
+              </div>
+              {form.attachmentUrl && form.attachmentUrl.startsWith("data:image") && (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <img src={form.attachmentUrl} alt="Comprobante" style={{ maxHeight: 100, borderRadius: 6, border: "1px solid var(--border-default)" }} />
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+            <button type="submit" className="btn btn-primary">
+              <Check size={15} /> {initialData ? "Actualizar" : "Guardar Transacción"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function TransactionsClient() {
+  const toast = useToast();
+  const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
+  const [showModal, setShowModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [filterAccount, setFilterAccount] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [datePreset, setDatePreset] = useState<"all" | "thisMonth" | "today">("all");
+  const [page, setPage] = useState(1);
+  const perPage = 8;
+
+  // Filter logic
+  const filtered = useMemo(() => {
+    return transactionsList.filter(tx => {
+      const matchSearch = !search ||
+        tx.description.toLowerCase().includes(search.toLowerCase()) ||
+        (tx.category?.name && tx.category.name.toLowerCase().includes(search.toLowerCase())) ||
+        tx.account.name.toLowerCase().includes(search.toLowerCase());
+
+      const matchType = filterType === "all" || tx.type === filterType;
+      const matchAccount = filterAccount === "all" || tx.account.name === filterAccount;
+      const matchCategory = filterCategory === "all" || (tx.category && tx.category.name === filterCategory);
+      const matchStatus = filterStatus === "all" || tx.status === filterStatus;
+
+      let matchDate = true;
+      if (datePreset === "today") {
+        const todayStr = format(new Date(), "yyyy-MM-dd");
+        matchDate = format(tx.date, "yyyy-MM-dd") === todayStr;
+      } else if (datePreset === "thisMonth") {
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        matchDate = tx.date.getMonth() === currentMonth && tx.date.getFullYear() === currentYear;
+      }
+
+      return matchSearch && matchType && matchAccount && matchCategory && matchStatus && matchDate;
+    });
+  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterStatus, datePreset]);
+
+  const paginated = filtered.slice((page - 1) * perPage, page * perPage);
+  const totalPages = Math.ceil(filtered.length / perPage) || 1;
+
+  const totals = useMemo(() => ({
+    income: filtered.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount), 0),
+    expense: filtered.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount), 0),
+  }), [filtered]);
+
+  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+  const handleSaveTransaction = (saved: Partial<TransactionItem>) => {
+    if (saved.id) {
+      // update
+      setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved } as TransactionItem : t));
+      toast.success("Transacción actualizada exitosamente");
+    } else {
+      // create
+      const newTx: TransactionItem = {
+        id: String(Date.now()),
+        description: saved.description!,
+        type: saved.type!,
+        amount: saved.amount!,
+        currency: "USD",
+        date: saved.date || new Date(),
+        status: saved.status || "cleared",
+        category: saved.category || null,
+        account: saved.account || { name: "Cuenta Corriente" },
+        toAccount: saved.toAccount || null,
+        member: saved.member || { displayName: "Ana M." },
+        isRecurring: saved.isRecurring,
+        recurringFrequency: saved.recurringFrequency,
+        attachmentUrl: saved.attachmentUrl,
+        notes: saved.notes,
+      };
+      setTransactionsList(prev => [newTx, ...prev]);
+      toast.success("Transacción registrada exitosamente");
+    }
+    setEditingItem(null);
+  };
+
+  const handleDelete = (id: string) => {
+    if (window.confirm("¿Seguro que deseas eliminar esta transacción?")) {
+      setTransactionsList(prev => prev.filter(t => t.id !== id));
+      toast.info("Transacción eliminada");
+    }
+  };
+
+  const exportToExcel = () => {
+    const dataToExport = filtered.map(t => ({
+      Fecha: format(t.date, "yyyy-MM-dd"),
+      Tipo: t.type === "income" ? "Ingreso" : t.type === "expense" ? "Egreso" : "Transferencia",
+      Descripción: t.description,
+      Categoría: t.category?.name || "N/A",
+      Cuenta: t.account.name,
+      "Cuenta Destino": t.toAccount?.name || "N/A",
+      Integrante: t.member?.displayName || "Hogar",
+      Monto: parseFloat(t.amount),
+      Moneda: t.currency,
+      Estado: t.status,
+      Recurrente: t.isRecurring ? `Sí (${t.recurringFrequency})` : "No",
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Transacciones");
+    XLSX.writeFile(workbook, `Transacciones_ACHouse_${format(new Date(), "yyyyMMdd_HHmm")}.xlsx`);
+    toast.success("Archivo Excel exportado con éxito");
+  };
+
+  return (
+    <>
+      {showModal && (
+        <TransactionModal
+          onClose={() => { setShowModal(false); setEditingItem(null); }}
+          onSave={handleSaveTransaction}
+          initialData={editingItem}
+        />
+      )}
+
+      {/* Attachment Lightbox Modal */}
+      {previewAttachment && (
+        <div
+          className="overlay"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setPreviewAttachment(null)}
+        >
+          <div className="card" style={{ maxWidth: 600, padding: "1.5rem", position: "relative" }}>
+            <button
+              className="btn btn-ghost btn-icon"
+              style={{ position: "absolute", top: 12, right: 12 }}
+              onClick={() => setPreviewAttachment(null)}
+            >
+              <X size={18} />
+            </button>
+            <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "1rem" }}>Comprobante Adjunto</h3>
+            <img
+              src={previewAttachment}
+              alt="Comprobante"
+              style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8 }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+          <div className="page-header" style={{ marginBottom: 0 }}>
+            <h1 className="page-title">Transacciones</h1>
+            <p className="page-subtitle">{filtered.length} transacciones registradas</p>
+          </div>
+          <div style={{ display: "flex", gap: "0.625rem" }}>
+            <button className="btn btn-secondary btn-sm" onClick={exportToExcel} title="Exportar a Excel">
+              <FileSpreadsheet size={15} color="#22c55e" /> Exportar Excel
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => { setEditingItem(null); setShowModal(true); }}
+            >
+              <Plus size={16} /> Nueva Transacción
+            </button>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+          {[
+            { label: "Total Ingresos", value: fmt(totals.income), color: "var(--color-income)", bg: "var(--color-income-dim)", icon: ArrowUpCircle },
+            { label: "Total Egresos", value: fmt(totals.expense), color: "var(--color-expense)", bg: "var(--color-expense-dim)", icon: ArrowDownCircle },
+            {
+              label: "Balance Neto",
+              value: ((totals.income - totals.expense) >= 0 ? "+" : "") + fmt(totals.income - totals.expense),
+              color: (totals.income - totals.expense) >= 0 ? "var(--color-income)" : "var(--color-expense)",
+              bg: (totals.income - totals.expense) >= 0 ? "var(--color-income-dim)" : "var(--color-expense-dim)",
+              icon: ArrowLeftRight
+            },
+          ].map(card => (
+            <div key={card.label} className="card" style={{ background: card.bg, border: `1px solid var(--border-subtle)`, padding: "1.25rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "0.5rem" }}>
+                <card.icon size={16} color={card.color} />
+                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{card.label}</span>
+              </div>
+              <p style={{ fontSize: "1.375rem", fontWeight: 800, color: card.color }}>{card.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Filters Bar */}
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
+            <Search size={15} style={{ position: "absolute", left: "0.875rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+            <input
+              className="input"
+              placeholder="Buscar por descripción, categoría, cuenta..."
+              style={{ paddingLeft: "2.5rem" }}
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+            />
+          </div>
+
+          {/* Type filters */}
+          <div style={{ display: "flex", gap: "0.375rem" }}>
+            {["all", "income", "expense", "transfer"].map(t => (
+              <button
+                key={t}
+                onClick={() => { setFilterType(t); setPage(1); }}
+                className={`btn btn-sm ${filterType === t ? "btn-primary" : "btn-secondary"}`}
+              >
+                {t === "all" ? "Todos" : TYPE_CONFIG[t as keyof typeof TYPE_CONFIG]?.label ?? t}
+              </button>
+            ))}
+          </div>
+
+          {/* Date Presets */}
+          <div style={{ display: "flex", gap: "0.375rem" }}>
+            {[
+              { id: "all", label: "Todo el tiempo" },
+              { id: "thisMonth", label: "Este mes" },
+              { id: "today", label: "Hoy" },
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => { setDatePreset(p.id as any); setPage(1); }}
+                className={`btn btn-sm ${datePreset === p.id ? "btn-secondary" : "btn-ghost"}`}
+                style={{ fontSize: "0.75rem", border: datePreset === p.id ? "1px solid var(--color-brand-400)" : "1px solid transparent" }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table or Empty State */}
+        {transactionsList.length === 0 ? (
+          <div className="card empty-state">
+            <div className="empty-state-icon">💸</div>
+            <p className="empty-state-title">No hay transacciones registradas</p>
+            <p className="empty-state-desc">Comienza registrando tus primeros ingresos, gastos o transferencias para ver el flujo en tiempo real.</p>
+            <button className="btn btn-primary btn-sm" onClick={() => { setEditingItem(null); setShowModal(true); }}>
+              <Plus size={14} /> Registrar Primera Transacción
+            </button>
+          </div>
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Descripción</th>
+                  <th>Categoría</th>
+                  <th>Cuenta</th>
+                  <th>Integrante</th>
+                  <th>Fecha</th>
+                  <th>Estado</th>
+                  <th style={{ textAlign: "right" }}>Monto</th>
+                  <th style={{ textAlign: "center" }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--text-secondary)" }}>
+                      No se encontraron transacciones con los filtros aplicados.
+                    </td>
+                  </tr>
+                ) : (
+                paginated.map(tx => {
+                  const typeCfg = TYPE_CONFIG[tx.type];
+                  const statusCfg = STATUS_CONFIG[tx.status] ?? STATUS_CONFIG.cleared;
+                  return (
+                    <tr key={tx.id}>
+                      <td>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: typeCfg.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <typeCfg.Icon size={16} color={typeCfg.color} />
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.125rem" }}>
+                          <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>{tx.description}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            {tx.isRecurring && (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: "0.6875rem", color: "var(--color-brand-300)" }}>
+                                <Repeat size={10} /> {tx.recurringFrequency || "Recurrente"}
+                              </span>
+                            )}
+                            {tx.attachmentUrl && (
+                              <button
+                                onClick={() => setPreviewAttachment(tx.attachmentUrl!)}
+                                style={{ background: "transparent", border: "none", color: "var(--color-brand-400)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, fontSize: "0.6875rem", padding: 0 }}
+                              >
+                                <Paperclip size={10} /> Ver Recibo
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        {tx.category ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: tx.category.color, flexShrink: 0 }} />
+                            {tx.category.name}
+                          </span>
+                        ) : tx.type === "transfer" ? (
+                          <span style={{ fontSize: "0.75rem", color: "var(--color-warning)" }}>Transferencia</span>
+                        ) : (
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                        {tx.account.name}
+                        {tx.toAccount && (
+                          <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", display: "block" }}>
+                            → {tx.toAccount.name}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{tx.member?.displayName || "Hogar"}</td>
+                      <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                        {format(tx.date, "dd MMM yyyy", { locale: es })}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: "0.75rem", fontWeight: 600, color: statusCfg.color, background: `${statusCfg.color}15`, padding: "0.2rem 0.5rem", borderRadius: 999 }}>
+                          {statusCfg.label}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: typeCfg.color }}>
+                          {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
+                          {fmt(parseFloat(tx.amount))}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <div style={{ display: "flex", gap: "0.25rem", justifyContent: "center" }}>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            title="Editar"
+                            onClick={() => { setEditingItem(tx); setShowModal(true); }}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            title="Eliminar"
+                            style={{ color: "#f87171" }}
+                            onClick={() => handleDelete(tx.id)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+              Mostrando {(page - 1) * perPage + 1}–{Math.min(page * perPage, filtered.length)} de {filtered.length}
+            </span>
+            <div style={{ display: "flex", gap: "0.375rem" }}>
+              <button
+                className="btn btn-secondary btn-sm btn-icon"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+              >
+                <ChevronLeft size={15} />
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
+                  style={{ minWidth: 34 }}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                className="btn btn-secondary btn-sm btn-icon"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

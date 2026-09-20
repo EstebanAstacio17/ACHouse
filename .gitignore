@@ -1,0 +1,42 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Next.js
+.next
+out
+build
+dist
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Turbo
+.turbo
+
+# Vercel
+.vercel
+
+# Drizzle
+packages/db/migrations/*.sql
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output

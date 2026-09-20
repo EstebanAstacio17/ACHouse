@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@achouse/db": ["../../packages/db/index.ts"],
+      "@achouse/db/*": ["../../packages/db/*"],
+      "@achouse/types": ["../../packages/types/index.ts"]
+    }
+  },
+  "include": [".", "../../packages/db", "../../packages/types"],
+  "exclude": ["node_modules"]
+}
