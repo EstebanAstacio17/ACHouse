@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   X, User, Mail, Shield, Home, Calendar, Clock,
   LogOut, CheckCircle2, KeyRound, Globe, ExternalLink
@@ -30,7 +31,12 @@ export function UserProfileModal({
 }: UserProfileModalProps) {
   const router = useRouter();
   const toast = useToast();
+  const [mounted, setMounted] = useState(false);
   const [household, setHousehold] = useState<{ name: string; currency: string; timezone: string } | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -62,7 +68,7 @@ export function UserProfileModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const displayName = user?.name || "Administrador del Hogar";
   const displayEmail = user?.email || "usuario@achouse.com";
@@ -83,19 +89,25 @@ export function UserProfileModal({
     }
   };
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.72)",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: "100vw",
+        height: "100vh",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
-        zIndex: 99999,
+        zIndex: 999999,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: "1.25rem",
+        boxSizing: "border-box",
         overflowY: "auto",
       }}
       onClick={(e) => {
@@ -104,12 +116,12 @@ export function UserProfileModal({
     >
       <div
         style={{
-          width: "min(520px, 95vw)",
-          maxHeight: "min(90vh, 760px)",
+          width: "min(520px, 94vw)",
+          maxHeight: "min(88vh, 720px)",
           backgroundColor: "var(--bg-card)",
           border: "1px solid var(--border-default)",
           borderRadius: "var(--radius-2xl)",
-          boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08)",
+          boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -451,6 +463,7 @@ export function UserProfileModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
