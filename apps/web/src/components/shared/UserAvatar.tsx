@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { Component, type ReactNode, type ErrorInfo, useState, useEffect, useRef } from "react";
+import { useUser, useClerk } from "@clerk/nextjs";
 import {
   User, Settings, LogOut, Shield, ChevronDown, CheckCircle2,
   ExternalLink, CreditCard, Sparkles, Home
@@ -16,6 +17,31 @@ const hasValidClerkKey =
   (pubKey.startsWith("pk_test_") || pubKey.startsWith("pk_live_")) &&
   !pubKey.includes("REEMPLAZAR") &&
   pubKey.length > 20;
+
+class SafeAvatarBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; fallback: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.warn("[SafeAvatarBoundary] Caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
 export function UserAvatar() {
   const [mounted, setMounted] = useState(false);
@@ -47,7 +73,11 @@ export function UserAvatar() {
   }
 
   if (hasValidClerkKey) {
-    return <ClerkConnectedAvatar />;
+    return (
+      <SafeAvatarBoundary fallback={<CustomUserDropdown fallbackMode />}>
+        <ClerkConnectedAvatar />
+      </SafeAvatarBoundary>
+    );
   }
 
   return <CustomUserDropdown fallbackMode />;
@@ -57,8 +87,6 @@ export function UserAvatar() {
  * Connected to Clerk authentication
  */
 function ClerkConnectedAvatar() {
-  // Dynamically require Clerk hooks only when ClerkProvider is mounted
-  const { useUser, useClerk } = require("@clerk/nextjs");
   const { user, isLoaded } = useUser();
   const { signOut, openUserProfile } = useClerk();
   const router = useRouter();
