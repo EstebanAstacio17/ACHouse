@@ -3,11 +3,12 @@
 import { useState, useEffect } from "react";
 import {
   Home, Globe, Shield, Download, Trash2, Check, Moon, Sun,
-  Clock, AlertTriangle, FileJson, CheckCircle2, History
+  Clock, AlertTriangle, FileJson, CheckCircle2, History, MapPin
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
+import { COUNTRIES, CURRENCIES, TIMEZONES } from "@/lib/geo";
 
 const INITIAL_AUDIT_LOGS: Array<{ id: string; action: string; entity: string; user: string; date: Date }> = [];
 
@@ -17,8 +18,9 @@ export function SettingsClient() {
 
   // General Settings Form
   const [householdName, setHouseholdName] = useState("Mi Hogar");
-  const [currency, setCurrency] = useState("USD");
-  const [timezone, setTimezone] = useState("America/Tegucigalpa");
+  const [country, setCountry] = useState("DO");
+  const [currency, setCurrency] = useState("DOP");
+  const [timezone, setTimezone] = useState("America/Santo_Domingo");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -30,8 +32,9 @@ export function SettingsClient() {
           const current = data.households.find((h: any) => h.id === data.activeHouseholdId) || data.households[0];
           if (current) {
             setHouseholdName(current.name || "Mi Hogar");
-            setCurrency(current.defaultCurrency || "USD");
-            setTimezone(current.timezone || "America/Tegucigalpa");
+            if (current.country) setCountry(current.country);
+            setCurrency(current.defaultCurrency || "DOP");
+            setTimezone(current.timezone || "America/Santo_Domingo");
           }
         }
       })
@@ -66,6 +69,15 @@ export function SettingsClient() {
     toast.info(`Tema cambiado a ${newTheme === "dark" ? "Modo Noche (Dark)" : "Modo Día (Light)"}`);
   };
 
+  const handleCountryChange = (newCountryCode: string) => {
+    setCountry(newCountryCode);
+    const cInfo = COUNTRIES.find(c => c.code === newCountryCode);
+    if (cInfo) {
+      setCurrency(cInfo.defaultCurrency);
+      setTimezone(cInfo.defaultTimezone);
+    }
+  };
+
   const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -74,6 +86,7 @@ export function SettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: householdName,
+          country,
           currency,
           timezone,
         }),
@@ -96,6 +109,7 @@ export function SettingsClient() {
       exportDate: new Date().toISOString(),
       household: {
         name: householdName,
+        country,
         currency,
         timezone,
       },
@@ -161,34 +175,58 @@ export function SettingsClient() {
                 />
               </div>
 
+              <div className="form-group">
+                <label className="label">
+                  <MapPin size={14} style={{ display: "inline", marginRight: "0.35rem", verticalAlign: "middle", color: "var(--color-primary)" }} />
+                  País de residencia
+                </label>
+                <select
+                  className="input"
+                  value={country}
+                  onChange={e => handleCountryChange(e.target.value)}
+                >
+                  {COUNTRIES.map(c => (
+                    <option key={c.code} value={c.code}>
+                      {c.flag} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 <div className="form-group">
-                  <label className="label">Moneda Principal</label>
+                  <label className="label">
+                    <Globe size={14} style={{ display: "inline", marginRight: "0.35rem", verticalAlign: "middle" }} />
+                    Moneda Principal
+                  </label>
                   <select
                     className="input"
                     value={currency}
                     onChange={e => setCurrency(e.target.value)}
                   >
-                    <option value="USD">USD — Dólar Estadounidense ($)</option>
-                    <option value="HNL">HNL — Lempira Hondureño (L)</option>
-                    <option value="EUR">EUR — Euro (€)</option>
-                    <option value="MXN">MXN — Peso Mexicano ($)</option>
+                    {CURRENCIES.map(curr => (
+                      <option key={curr.code} value={curr.code}>
+                        {curr.flag ? `${curr.flag} ` : ""}{curr.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label className="label">Zona Horaria</label>
+                  <label className="label">
+                    <Clock size={14} style={{ display: "inline", marginRight: "0.35rem", verticalAlign: "middle" }} />
+                    Zona Horaria
+                  </label>
                   <select
                     className="input"
                     value={timezone}
                     onChange={e => setTimezone(e.target.value)}
                   >
-                    <option value="America/Tegucigalpa">America/Tegucigalpa (UTC-6)</option>
-                    <option value="America/Guatemala">America/Guatemala (UTC-6)</option>
-                    <option value="America/Mexico_City">America/Mexico_City (UTC-6)</option>
-                    <option value="America/Bogota">America/Bogota (UTC-5)</option>
-                    <option value="America/New_York">America/New_York (UTC-5)</option>
-                    <option value="Europe/Madrid">Europe/Madrid (UTC+1)</option>
+                    {TIMEZONES.map(tz => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

@@ -65,6 +65,7 @@ function LoanModal({
   const [lenderName, setLenderName] = useState("");
   const [borrowerName, setBorrowerName] = useState("");
   const [principal, setPrincipal] = useState("");
+  const [currency, setCurrency] = useState("DOP");
   const [rate, setRate] = useState("8.5");
   const [termMonths, setTermMonths] = useState("36");
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -99,7 +100,7 @@ function LoanModal({
       monthlyPayment: calculatedPayment,
       startDate: start,
       endDate: end,
-      currency: "USD",
+      currency,
     });
     onClose();
   };
@@ -171,6 +172,17 @@ function LoanModal({
               <div className="form-group">
                 <label className="label"><DollarSign size={12} style={{ display: "inline" }} />Monto Principal *</label>
                 <input className="input" type="number" step="0.01" required placeholder="0.00" value={principal} onChange={e => setPrincipal(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="label">Moneda</label>
+                <select className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
+                  <option value="DOP">DOP (RD$)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="MXN">MXN ($)</option>
+                  <option value="HNL">HNL (L)</option>
+                  <option value="COP">COP ($)</option>
+                </select>
               </div>
               <div className="form-group">
                 <label className="label">Tasa de interés anual (%)</label>
@@ -683,7 +695,13 @@ export function LoansClient() {
     loadData();
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number, currency = "DOP") => {
+    try {
+      return n.toLocaleString("es-DO", { style: "currency", currency });
+    } catch {
+      return `${currency} ${n.toFixed(2)}`;
+    }
+  };
 
   const totalLoanDebt = loans.reduce((sum, l) => sum + l.remainingBalance, 0);
   const totalCardDebt = cards.reduce((sum, c) => sum + c.balance, 0);

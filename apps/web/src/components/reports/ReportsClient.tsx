@@ -72,13 +72,20 @@ export function ReportsClient() {
     id: "none",
     name: "Sin cuentas",
     expectedBalance: 0,
-    currency: "USD",
+    currency: "DOP",
   };
 
+  const reportCurrency = accounts[0]?.currency || "DOP";
   const reconDifference = parseFloat(statementBalance || "0") - activeReconAccount.expectedBalance;
   const isMatched = Math.abs(reconDifference) < 0.01;
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number, curr = reportCurrency) => {
+    try {
+      return n.toLocaleString("es-DO", { style: "currency", currency: curr });
+    } catch {
+      return `${curr} ${n.toFixed(2)}`;
+    }
+  };
 
   const totalIncome = useMemo(() => {
     return transactions.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
@@ -159,23 +166,23 @@ export function ReportsClient() {
 
     doc.setFontSize(10);
     doc.text(`Fecha de emisión: ${format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: es })}`, 14, 28);
-    doc.text("Hogar: ACHouse · Moneda: USD", 14, 34);
+    doc.text(`Hogar: ACHouse · Moneda: ${reportCurrency}`, 14, 34);
 
     // Summary block
     doc.setFontSize(12);
     doc.text("Resumen General", 14, 46);
     doc.setFontSize(10);
-    doc.text(`Total Ingresos: $${totalIncome.toLocaleString()}`, 14, 54);
-    doc.text(`Total Egresos: $${totalExpense.toLocaleString()}`, 14, 60);
-    doc.text(`Flujo Neto: ${netFlow >= 0 ? "+" : ""}$${netFlow.toLocaleString()}`, 14, 66);
+    doc.text(`Total Ingresos: ${fmt(totalIncome)}`, 14, 54);
+    doc.text(`Total Egresos: ${fmt(totalExpense)}`, 14, 60);
+    doc.text(`Flujo Neto: ${netFlow >= 0 ? "+" : ""}${fmt(netFlow)}`, 14, 66);
     doc.text(`Tasa de Ahorro: ${savingsRate.toFixed(1)}%`, 14, 72);
 
     // Table
     autoTable(doc, {
       startY: 80,
-      head: [["Categoría", "Monto (USD)", "Distribución %"]],
+      head: [["Categoría", `Monto (${reportCurrency})`, "Distribución %"]],
       body: categoryBreakdown.length > 0
-        ? categoryBreakdown.map(c => [c.category, `$${c.amount.toLocaleString()}`, `${c.percentage}%`])
+        ? categoryBreakdown.map(c => [c.category, fmt(c.amount), `${c.percentage}%`])
         : [["Sin datos", "$0.00", "0%"]],
       theme: "striped",
       headStyles: { fillColor: [99, 102, 241] },

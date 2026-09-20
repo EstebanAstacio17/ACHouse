@@ -21,6 +21,7 @@ export const households = pgTable("households", {
   name: text("name").notNull(),
   defaultCurrency: text("default_currency").notNull().default("USD"),
   timezone: text("timezone").notNull().default("UTC"),
+  country: text("country"),
   logoUrl: text("logo_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

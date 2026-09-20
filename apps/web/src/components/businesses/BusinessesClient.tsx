@@ -36,7 +36,7 @@ function BusinessModal({
     name: initialData?.name ?? "",
     description: initialData?.description ?? "",
     type: initialData?.type ?? "Comercio",
-    currency: initialData?.currency ?? "USD",
+    currency: initialData?.currency ?? "DOP",
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -105,10 +105,12 @@ function BusinessModal({
               <div className="form-group">
                 <label className="label">Moneda</label>
                 <select className="input" value={form.currency} onChange={e => set("currency", e.target.value)}>
-                  <option value="USD">USD</option>
-                  <option value="HNL">HNL</option>
-                  <option value="MXN">MXN</option>
-                  <option value="EUR">EUR</option>
+                  <option value="DOP">DOP (RD$)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="MXN">MXN ($)</option>
+                  <option value="HNL">HNL (L)</option>
+                  <option value="COP">COP ($)</option>
                 </select>
               </div>
             </div>

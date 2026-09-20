@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import { db } from "@achouse/db";
-import { householdMembers } from "@achouse/db/schema";
+import { households, householdMembers } from "@achouse/db/schema";
 import { eq, and } from "drizzle-orm";
 
 /**
@@ -34,4 +34,16 @@ export async function getActiveHouseholdId(): Promise<string> {
   }
 
   return member.householdId;
+}
+
+export async function getActiveHousehold() {
+  try {
+    const householdId = await getActiveHouseholdId();
+    const h = await db.query.households.findFirst({
+      where: eq(households.id, householdId),
+    });
+    return h || null;
+  } catch {
+    return null;
+  }
 }

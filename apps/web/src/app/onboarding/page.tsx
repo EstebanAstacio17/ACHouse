@@ -2,36 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Home, Globe, Clock, ChevronRight, CheckCircle2, Loader2, Sparkles } from "lucide-react";
-
-const currencies = [
-  { code: "USD", label: "Dólar estadounidense ($)" },
-  { code: "HNL", label: "Lempira hondureño (L)" },
-  { code: "MXN", label: "Peso mexicano ($)" },
-  { code: "GTQ", label: "Quetzal guatemalteco (Q)" },
-  { code: "EUR", label: "Euro (€)" },
-  { code: "COP", label: "Peso colombiano ($)" },
-  { code: "PEN", label: "Sol peruano (S/)" },
-  { code: "ARS", label: "Peso argentino ($)" },
-];
-
-const timezones = [
-  { value: "America/Tegucigalpa", label: "Honduras / Centroamérica (UTC-6)" },
-  { value: "America/Mexico_City", label: "México Centro (UTC-6)" },
-  { value: "America/Bogota", label: "Colombia (UTC-5)" },
-  { value: "America/Lima", label: "Perú (UTC-5)" },
-  { value: "America/New_York", label: "Este EE.UU. / Miami (UTC-5)" },
-  { value: "Europe/Madrid", label: "Madrid (UTC+1)" },
-  { value: "UTC", label: "UTC" },
-];
+import { Home, Globe, Clock, ChevronRight, CheckCircle2, Loader2, Sparkles, MapPin } from "lucide-react";
+import { COUNTRIES, CURRENCIES, TIMEZONES } from "@/lib/geo";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState<"choice" | "create" | "loading">("choice");
   const [form, setForm] = useState({
     name: "",
-    currency: "USD",
-    timezone: "America/Tegucigalpa",
+    country: "DO",
+    currency: "DOP",
+    timezone: "America/Santo_Domingo",
   });
   const [error, setError] = useState("");
 
@@ -46,6 +27,16 @@ export default function OnboardingPage() {
       })
       .catch(() => {});
   }, [router]);
+
+  const handleCountryChange = (countryCode: string) => {
+    const selected = COUNTRIES.find((c) => c.code === countryCode);
+    setForm((f) => ({
+      ...f,
+      country: countryCode,
+      currency: selected ? selected.defaultCurrency : f.currency,
+      timezone: selected ? selected.defaultTimezone : f.timezone,
+    }));
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +58,6 @@ export default function OnboardingPage() {
       router.push("/dashboard");
       router.refresh();
     } catch {
-      // Fallback in local/demo mode
       setTimeout(() => {
         router.push("/dashboard");
       }, 800);
@@ -135,7 +125,7 @@ export default function OnboardingPage() {
         }}
       />
 
-      <div style={{ width: "100%", maxWidth: 500, position: "relative" }}>
+      <div style={{ width: "100%", maxWidth: 520, position: "relative" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "2rem" }}>
           <div
@@ -154,7 +144,7 @@ export default function OnboardingPage() {
           >
             🏠
           </div>
-          <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "0.375rem" }}>
+          <h1 className="hero-title-gradient" style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "0.375rem" }}>
             Bienvenido a ACHouse
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.9375rem" }}>
@@ -164,23 +154,25 @@ export default function OnboardingPage() {
 
         {step === "choice" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {/* Create option */}
             <button
               className="card"
-              onClick={() => setStep("create")}
               style={{
-                cursor: "pointer",
-                textAlign: "left",
                 display: "flex",
                 alignItems: "center",
                 gap: "1rem",
+                cursor: "pointer",
+                textAlign: "left",
+                border: "1.5px solid var(--border-default)",
                 transition: "all var(--duration-fast) var(--ease-out)",
-                border: "1px solid var(--border-default)",
+                background: "var(--bg-card)",
               }}
+              onClick={() => setStep("create")}
             >
               <div
                 style={{
-                  width: 46,
-                  height: 46,
+                  width: 48,
+                  height: 48,
                   borderRadius: "var(--radius-lg)",
                   background: "var(--accent-subtle)",
                   display: "flex",
@@ -189,33 +181,35 @@ export default function OnboardingPage() {
                   flexShrink: 0,
                 }}
               >
-                <Home size={22} color="var(--accent)" />
+                <Home size={24} color="var(--accent)" />
               </div>
               <div style={{ flex: 1 }}>
-                <p style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.15rem", letterSpacing: "-0.01em" }}>
+                <p style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.2rem", color: "var(--text-primary)" }}>
                   Crear un nuevo hogar
                 </p>
-                <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
-                  Configura el nombre, moneda y zona horaria
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                  Empieza desde cero y configura tus cuentas, miembros y categorías iniciales.
                 </p>
               </div>
               <ChevronRight size={18} color="var(--text-tertiary)" />
             </button>
 
+            {/* Join option */}
             <div
               className="card"
               style={{
-                opacity: 0.6,
                 display: "flex",
                 alignItems: "center",
                 gap: "1rem",
                 cursor: "default",
+                background: "var(--bg-card)",
+                opacity: 0.85,
               }}
             >
               <div
                 style={{
-                  width: 46,
-                  height: 46,
+                  width: 48,
+                  height: 48,
                   borderRadius: "var(--radius-lg)",
                   background: "var(--bg-active)",
                   display: "flex",
@@ -224,14 +218,14 @@ export default function OnboardingPage() {
                   flexShrink: 0,
                 }}
               >
-                <Globe size={22} color="var(--text-tertiary)" />
+                <Globe size={24} color="var(--text-tertiary)" />
               </div>
               <div style={{ flex: 1 }}>
-                <p style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.15rem" }}>
-                  Unirme a un hogar con invitación
+                <p style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.2rem", color: "var(--text-primary)" }}>
+                  Unirme a un hogar existente
                 </p>
-                <p style={{ fontSize: "0.8125rem", color: "var(--text-tertiary)" }}>
-                  Usa el enlace que recibiste por correo
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                  Usa el enlace de invitación recibido por correo electrónico para unirte a tu familia.
                 </p>
               </div>
             </div>
@@ -240,7 +234,7 @@ export default function OnboardingPage() {
 
         {step === "create" && (
           <div className="card">
-            <h2 style={{ fontWeight: 700, fontSize: "1.125rem", letterSpacing: "-0.01em", marginBottom: "1.25rem" }}>
+            <h2 style={{ fontWeight: 700, fontSize: "1.125rem", letterSpacing: "-0.01em", marginBottom: "1.25rem", color: "var(--text-primary)" }}>
               Configurar datos del hogar
             </h2>
             <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "1.125rem" }}>
@@ -251,16 +245,37 @@ export default function OnboardingPage() {
                 <input
                   id="household-name"
                   className="input"
-                  placeholder="Ej: Familia Martínez, Mi Casa..."
+                  placeholder="Ej: Astacio Cuevas, Mi Casa..."
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   required
                 />
               </div>
 
+              {/* Country Selection */}
+              <div className="form-group">
+                <label className="label" htmlFor="country">
+                  <MapPin size={13} style={{ display: "inline", marginRight: 4, verticalAlign: "-2px" }} />
+                  País
+                </label>
+                <select
+                  id="country"
+                  className="input"
+                  value={form.country}
+                  onChange={(e) => handleCountryChange(e.target.value)}
+                >
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.flag} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Currency Selection */}
               <div className="form-group">
                 <label className="label" htmlFor="currency">
-                  <Globe size={12} style={{ display: "inline", marginRight: 4 }} />
+                  <Globe size={13} style={{ display: "inline", marginRight: 4, verticalAlign: "-2px" }} />
                   Moneda predeterminada
                 </label>
                 <select
@@ -269,17 +284,18 @@ export default function OnboardingPage() {
                   value={form.currency}
                   onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
                 >
-                  {currencies.map((c) => (
+                  {CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>
-                      {c.code} — {c.label}
+                      {c.flag ? `${c.flag} ` : ""}{c.label}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* Timezone Selection */}
               <div className="form-group">
                 <label className="label" htmlFor="timezone">
-                  <Clock size={12} style={{ display: "inline", marginRight: 4 }} />
+                  <Clock size={13} style={{ display: "inline", marginRight: 4, verticalAlign: "-2px" }} />
                   Zona horaria
                 </label>
                 <select
@@ -288,7 +304,7 @@ export default function OnboardingPage() {
                   value={form.timezone}
                   onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
                 >
-                  {timezones.map((tz) => (
+                  {TIMEZONES.map((tz) => (
                     <option key={tz.value} value={tz.value}>
                       {tz.label}
                     </option>

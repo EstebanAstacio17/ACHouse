@@ -60,10 +60,10 @@ const CATEGORIES_LIST = [
 ];
 
 const ACCOUNTS_LIST = [
-  { id: "acc1", name: "Cuenta Corriente" },
-  { id: "acc2", name: "Tarjeta Visa" },
-  { id: "acc3", name: "Cuenta Ahorros" },
-  { id: "acc4", name: "Efectivo" },
+  { id: "acc1", name: "Cuenta Corriente", currency: "DOP" },
+  { id: "acc2", name: "Tarjeta Visa", currency: "DOP" },
+  { id: "acc3", name: "Cuenta Ahorros", currency: "DOP" },
+  { id: "acc4", name: "Efectivo", currency: "DOP" },
 ];
 
 const MEMBERS_LIST = [
@@ -85,7 +85,7 @@ function TransactionModal({
   onSave: (tx: Partial<TransactionItem>) => void;
   initialData?: TransactionItem | null;
   categoriesList: Array<{ id: string; name: string; color?: string }>;
-  accountsList: Array<{ id: string; name: string }>;
+  accountsList: Array<{ id: string; name: string; currency?: string }>;
   membersList: Array<{ id: string; displayName: string }>;
 }) {
   const [form, setForm] = useState({
@@ -134,7 +134,7 @@ function TransactionModal({
       description: form.description,
       type: form.type as any,
       amount: parseFloat(form.amount).toFixed(2),
-      currency: "USD",
+      currency: selectedAcc?.currency || "DOP",
       date: new Date(form.date + "T12:00:00"),
       status: form.status as any,
       category: form.type === "transfer" ? null : (selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color || "#6366f1" } : null),
@@ -356,7 +356,7 @@ function TransactionModal({
 export function TransactionsClient() {
   const toast = useToast();
   const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
-  const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string }>>([]);
   const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string }>>([]);
   const [showModal, setShowModal] = useState(false);
@@ -381,7 +381,7 @@ export function TransactionsClient() {
     ]).then(([txs, accs, cats, mems]) => {
       if (!active) return;
       if (accs) {
-        setAccountsList(accs.map((a: any) => ({ id: a.id, name: a.name })));
+        setAccountsList(accs.map((a: any) => ({ id: a.id, name: a.name, currency: a.currency })));
       }
       if (cats) {
         setCategoriesList(cats.map((c: any) => ({ id: c.id, name: c.name, color: c.color })));
@@ -396,7 +396,7 @@ export function TransactionsClient() {
             description: t.description,
             type: t.type as any,
             amount: String(t.amount),
-            currency: "USD",
+            currency: t.currency || "DOP",
             date: new Date(t.date),
             status: t.status as any,
             category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
@@ -449,7 +449,13 @@ export function TransactionsClient() {
     expense: filtered.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount), 0),
   }), [filtered]);
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number, currency = "DOP") => {
+    try {
+      return n.toLocaleString("es-DO", { style: "currency", currency });
+    } catch {
+      return `${currency} ${n.toFixed(2)}`;
+    }
+  };
 
   const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
     try {
@@ -483,7 +489,7 @@ export function TransactionsClient() {
           description: created.description,
           type: created.type as any,
           amount: String(created.amount),
-          currency: "USD",
+          currency: created.currency || saved.currency || "DOP",
           date: new Date(created.date),
           status: created.status as any,
           category: saved.category || null,
@@ -758,7 +764,7 @@ export function TransactionsClient() {
                       <td style={{ textAlign: "right" }}>
                         <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: typeCfg.color }}>
                           {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                          {fmt(parseFloat(tx.amount))}
+                          {fmt(parseFloat(tx.amount), tx.currency || "DOP")}
                         </span>
                       </td>
                       <td style={{ textAlign: "center" }}>

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check, TrendingUp, TrendingDown, AlertCircle, ShieldCheck } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getAccounts, createAccount, updateAccount, deleteAccount } from "@/lib/actions/entities";
+import { CURRENCIES } from "@/lib/geo";
 
 export interface AccountItem {
   id: string;
@@ -41,7 +42,7 @@ function AccountModal({
   const [form, setForm] = useState({
     name: initialData?.name ?? "",
     balance: initialData?.balance ?? "0",
-    currency: initialData?.currency ?? "USD",
+    currency: initialData?.currency ?? "DOP",
     creditLimit: initialData?.creditLimit ?? "",
     statementDay: initialData?.statementDay ? String(initialData.statementDay) : "",
     paymentDueDay: initialData?.paymentDueDay ? String(initialData.paymentDueDay) : "",
@@ -58,14 +59,13 @@ function AccountModal({
       id: initialData?.id,
       name: form.name.trim(),
       type,
-      balance: form.balance || "0",
+      balance: form.balance,
       currency: form.currency,
       isActive: true,
-      creditLimit: type === "credit" ? form.creditLimit || null : null,
-      availableCredit: type === "credit" ? String(Math.max(0, parseFloat(form.creditLimit || "0") - Math.abs(parseFloat(form.balance || "0")))) : null,
-      statementDay: type === "credit" && form.statementDay ? parseInt(form.statementDay) : null,
-      paymentDueDay: type === "credit" && form.paymentDueDay ? parseInt(form.paymentDueDay) : null,
-      minimumPayment: type === "credit" ? form.minimumPayment || null : null,
+      creditLimit: type === "credit" ? form.creditLimit : undefined,
+      statementDay: type === "credit" && form.statementDay ? parseInt(form.statementDay) : undefined,
+      paymentDueDay: type === "credit" && form.paymentDueDay ? parseInt(form.paymentDueDay) : undefined,
+      minimumPayment: type === "credit" ? form.minimumPayment : undefined,
     });
     onClose();
   };
@@ -74,61 +74,57 @@ function AccountModal({
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="modal">
+      <div className="modal" style={{ width: "min(500px, 95vw)" }}>
         <div className="modal-header">
           <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>
-            {initialData ? "Editar Cuenta" : "Nueva Cuenta"}
+            {initialData ? "Editar Cuenta" : "Nueva Cuenta / Tarjeta"}
           </h2>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}>
+            <X size={18} />
+          </button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {/* Type */}
-            <div>
-              <label className="label">Tipo de cuenta</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-                {Object.entries(ACCOUNT_TYPES).map(([key, cfg]) => (
+            {/* Account Type Selector */}
+            <div className="form-group">
+              <label className="label">Tipo de Cuenta</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
+                {Object.entries(ACCOUNT_TYPES).map(([k, v]) => (
                   <button
                     type="button"
-                    key={key}
-                    onClick={() => setType(key)}
-                    style={{
-                      padding: "0.625rem 0.875rem",
-                      borderRadius: "var(--radius-md)",
-                      border: `1.5px solid ${type === key ? cfg.color : "var(--border-default)"}`,
-                      background: type === key ? cfg.bg : "transparent",
-                      color: type === key ? cfg.color : "var(--text-secondary)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                      fontSize: "0.8125rem",
-                      fontWeight: 600,
-                      transition: "all 0.15s",
-                    }}
+                    key={k}
+                    onClick={() => setType(k as any)}
+                    className={`btn btn-sm ${type === k ? "btn-primary" : "btn-secondary"}`}
+                    style={{ fontSize: "0.75rem", padding: "0.5rem 0.25rem" }}
                   >
-                    <cfg.icon size={15} /> {cfg.label}
+                    <v.icon size={13} /> {v.label}
                   </button>
                 ))}
               </div>
             </div>
 
+            {/* Account Name */}
             <div className="form-group">
-              <label className="label">Nombre de la cuenta *</label>
+              <label className="label">Nombre de la Cuenta *</label>
               <input
                 className="input"
-                required
-                placeholder="Ej: BAC Cuenta Corriente, Tarjeta Visa..."
+                placeholder={
+                  type === "checking" ? "Ej: Banco BHD / Banreservas / Nómina" :
+                  type === "savings" ? "Ej: Fondo de Emergencia / Ahorros" :
+                  "Ej: Visa Platinum / Mastercard"
+                }
                 value={form.name}
                 onChange={e => set("name", e.target.value)}
+                required
               />
             </div>
 
+            {/* Balance & Currency */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
               <div className="form-group">
-                <label className="label">Saldo actual / Saldo inicial</label>
+                <label className="label">Balance Inicial</label>
                 <input
                   className="input"
                   type="number"
@@ -141,12 +137,11 @@ function AccountModal({
               <div className="form-group">
                 <label className="label">Moneda</label>
                 <select className="input" value={form.currency} onChange={e => set("currency", e.target.value)}>
-                  <option value="USD">USD ($)</option>
-                  <option value="HNL">HNL (L)</option>
-                  <option value="MXN">MXN ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GTQ">GTQ (Q)</option>
-                  <option value="COP">COP ($)</option>
+                  {CURRENCIES.map(curr => (
+                    <option key={curr.code} value={curr.code}>
+                      {curr.code} ({curr.symbol})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -252,8 +247,14 @@ export function AccountsClient() {
     };
   }, []);
 
-  const fmt = (n: number | string, currency = "USD") =>
-    parseFloat(String(n)).toLocaleString("en-US", { style: "currency", currency });
+  const fmt = (n: number | string, currency = "DOP") => {
+    try {
+      const num = parseFloat(String(n)) || 0;
+      return num.toLocaleString("es-DO", { style: "currency", currency });
+    } catch {
+      return `${currency} ${parseFloat(String(n) || "0").toFixed(2)}`;
+    }
+  };
 
   const totalAssets = accounts
     .filter(a => parseFloat(a.balance) > 0)

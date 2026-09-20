@@ -9,6 +9,7 @@ import { MonthlyCashflowChart } from "@/components/charts/MonthlyCashflowChart";
 import { CategoryDonutChart }  from "@/components/charts/CategoryDonutChart";
 import { getAccounts } from "@/lib/actions/entities";
 import { getTransactions } from "@/lib/actions/transactions";
+import { getActiveHousehold } from "@/lib/household";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -31,17 +32,22 @@ const DASH = (HEALTH_SCORE / 100) * CIRCUMFERENCE;
 export default async function DashboardPage() {
   let accountsList: any[] = [];
   let txList: any[] = [];
+  let household: any = null;
 
   try {
-    const [accs, txs] = await Promise.all([
+    const [accs, txs, h] = await Promise.all([
       getAccounts(),
       getTransactions({ perPage: 100 }),
+      getActiveHousehold(),
     ]);
     accountsList = accs || [];
     txList = txs || [];
+    household = h;
   } catch {
     // If not onboarded yet
   }
+
+  const defaultCurrency = household?.defaultCurrency || "DOP";
 
   const totalBalance = accountsList.reduce((sum, a) => sum + parseFloat(a.balance || "0"), 0);
 
@@ -64,8 +70,13 @@ export default async function DashboardPage() {
 
   const netFlow = monthIncome - monthExpense;
 
-  const fmtCurrency = (n: number) =>
-    n.toLocaleString("es-HN", { style: "currency", currency: "USD" });
+  const fmtCurrency = (n: number, curr = defaultCurrency) => {
+    try {
+      return n.toLocaleString("es-DO", { style: "currency", currency: curr });
+    } catch {
+      return `${curr} ${n.toFixed(2)}`;
+    }
+  };
 
   const kpis = [
     {
@@ -380,8 +391,8 @@ export default async function DashboardPage() {
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <span className={tx.type === "income" ? "amount-income" : "amount-expense"}>
-                          {tx.type === "income" ? "+" : ""}
-                          {Math.abs(tx.amount).toLocaleString("es-HN", { style: "currency", currency: "USD" })}
+                          {tx.type === "income" ? "+" : "-"}
+                          {fmtCurrency(Math.abs(tx.amount))}
                         </span>
                       </td>
                     </tr>

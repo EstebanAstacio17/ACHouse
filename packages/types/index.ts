@@ -10,6 +10,7 @@ export type Household = {
   name: string;
   defaultCurrency: string;
   timezone: string;
+  country?: string | null;
   logoUrl: string | null;
   createdAt: Date;
   updatedAt: Date;

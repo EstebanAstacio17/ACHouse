@@ -9,6 +9,7 @@ const createHouseholdSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres").max(60),
   currency: z.string().length(3),
   timezone: z.string(),
+  country: z.string().optional(),
 });
 
 const DEFAULT_CATEGORIES = [
@@ -45,13 +46,18 @@ export async function POST(req: Request) {
     );
   }
 
-  const { name, currency, timezone } = parsed.data;
+  const { name, currency, timezone, country } = parsed.data;
 
   try {
     // 1. Create household
     const [household] = await db
       .insert(households)
-      .values({ name, defaultCurrency: currency, timezone })
+      .values({
+        name,
+        defaultCurrency: currency,
+        timezone,
+        country: country || null,
+      })
       .returning();
 
     if (!household) {
@@ -171,6 +177,7 @@ export async function PATCH(req: Request) {
         name: body.name,
         defaultCurrency: body.currency,
         timezone: body.timezone,
+        ...(body.country !== undefined && { country: body.country }),
         updatedAt: new Date(),
       })
       .where(eq(households.id, householdId))

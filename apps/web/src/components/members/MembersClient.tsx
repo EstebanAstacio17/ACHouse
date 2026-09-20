@@ -149,7 +149,7 @@ function IncomeSourceModal({
   const [name, setName] = useState("");
   const [type, setType] = useState<"job" | "business" | "project">("job");
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("DOP");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,10 +207,12 @@ function IncomeSourceModal({
               <div className="form-group">
                 <label className="label">Moneda</label>
                 <select className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
-                  <option value="USD">USD</option>
-                  <option value="HNL">HNL</option>
-                  <option value="MXN">MXN</option>
-                  <option value="EUR">EUR</option>
+                  <option value="DOP">DOP (RD$)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="MXN">MXN ($)</option>
+                  <option value="HNL">HNL (L)</option>
+                  <option value="COP">COP ($)</option>
                 </select>
               </div>
             </div>
