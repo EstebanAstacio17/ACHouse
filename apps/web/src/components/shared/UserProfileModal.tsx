@@ -115,6 +115,7 @@ export function UserProfileModal({
       }}
     >
       <div
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(520px, 94vw)",
           maxHeight: "min(88vh, 720px)",
