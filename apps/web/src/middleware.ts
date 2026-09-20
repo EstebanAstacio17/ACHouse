@@ -31,8 +31,15 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     return NextResponse.redirect(signInUrl);
   }
 
+  // Allow all API routes to proceed (they handle their own auth checks)
+  if (req.nextUrl.pathname.startsWith("/api")) {
+    return NextResponse.next();
+  }
+
+  const householdCookie = req.cookies.get("household_id")?.value;
   const metadata = sessionClaims?.metadata as Record<string, unknown> | undefined;
-  const hasHousehold = metadata?.householdId;
+  const hasHousehold = Boolean(householdCookie || metadata?.householdId);
+
   if (!hasHousehold && !isOnboardingRoute(req)) {
     return NextResponse.redirect(new URL("/onboarding", req.url));
   }

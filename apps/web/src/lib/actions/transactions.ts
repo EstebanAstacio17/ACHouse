@@ -11,21 +11,14 @@ import {
 import { eq, and, desc, gte, lte, ilike, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { cookies } from "next/headers";
+import { getActiveHouseholdId } from "@/lib/household";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-async function getHouseholdId(): Promise<string> {
-  const cookieStore = await cookies();
-  const hid = cookieStore.get("household_id")?.value;
-  if (!hid) throw new Error("No active household");
-  return hid;
-}
 
 async function getAuthenticatedMember() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
-  const householdId = await getHouseholdId();
+  const householdId = await getActiveHouseholdId();
 
   const member = await db.query.householdMembers.findFirst({
     where: (m) => and(eq(m.clerkUserId, userId), eq(m.householdId, householdId), eq(m.isActive, true)),
@@ -113,7 +106,7 @@ export async function getTransactions(filters?: {
   return rows;
 }
 
-export async function createTransaction(data: z.infer<typeof transactionSchema>) {
+export async function createTransaction(data: z.input<typeof transactionSchema>) {
   const { householdId, userId, member } = await getAuthenticatedMember();
   const parsed = transactionSchema.parse(data);
 

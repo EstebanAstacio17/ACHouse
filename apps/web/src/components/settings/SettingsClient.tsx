@@ -23,6 +23,22 @@ export function SettingsClient() {
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
+    fetch("/api/households")
+      .then(res => res.json())
+      .then(data => {
+        if (data.households && data.households.length > 0) {
+          const current = data.households.find((h: any) => h.id === data.activeHouseholdId) || data.households[0];
+          if (current) {
+            setHouseholdName(current.name || "Mi Hogar");
+            setCurrency(current.defaultCurrency || "USD");
+            setTimezone(current.timezone || "America/Tegucigalpa");
+          }
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
     const applyTheme = () => {
       const saved = localStorage.getItem("achouse-theme") as "dark" | "light" | null;
       if (saved) {
@@ -50,11 +66,28 @@ export function SettingsClient() {
     toast.info(`Tema cambiado a ${newTheme === "dark" ? "Modo Noche (Dark)" : "Modo Día (Light)"}`);
   };
 
-  const handleSaveGeneral = (e: React.FormEvent) => {
+  const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedSuccess(true);
-    toast.success("Ajustes del hogar guardados exitosamente");
-    setTimeout(() => setSavedSuccess(false), 3000);
+    try {
+      const res = await fetch("/api/households", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: householdName,
+          currency,
+          timezone,
+        }),
+      });
+      if (res.ok) {
+        setSavedSuccess(true);
+        toast.success("Ajustes del hogar guardados exitosamente");
+        setTimeout(() => setSavedSuccess(false), 3000);
+      } else {
+        toast.error("Error al guardar ajustes");
+      }
+    } catch {
+      toast.error("Error de conexión al guardar");
+    }
   };
 
   const handleExportBackup = () => {

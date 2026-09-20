@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check, TrendingUp, TrendingDown, AlertCircle, ShieldCheck } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
+import { getAccounts, createAccount, updateAccount, deleteAccount } from "@/lib/actions/entities";
 
 export interface AccountItem {
   id: string;
@@ -223,6 +224,34 @@ export function AccountsClient() {
   const [showModal, setShowModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    getAccounts()
+      .then((data) => {
+        if (active && data) {
+          setAccounts(
+            data.map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              type: a.type,
+              balance: String(a.balance ?? "0"),
+              currency: a.currency ?? "USD",
+              isActive: a.isActive ?? true,
+              creditLimit: a.creditLimit ? String(a.creditLimit) : null,
+              availableCredit: a.availableCredit ? String(a.availableCredit) : null,
+              statementDay: a.statementDay,
+              paymentDueDay: a.paymentDueDay,
+              minimumPayment: a.minimumPayment ? String(a.minimumPayment) : null,
+            }))
+          );
+        }
+      })
+      .catch((err) => console.error("Error loading accounts:", err));
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const fmt = (n: number | string, currency = "USD") =>
     parseFloat(String(n)).toLocaleString("en-US", { style: "currency", currency });
 
@@ -234,34 +263,64 @@ export function AccountsClient() {
     .filter(a => parseFloat(a.balance) < 0)
     .reduce((s, a) => s + Math.abs(parseFloat(a.balance)), 0);
 
-  const handleSaveAccount = (saved: Partial<AccountItem>) => {
-    if (saved.id) {
-      setAccounts(prev => prev.map(a => a.id === saved.id ? { ...a, ...saved } as AccountItem : a));
-      toast.success("Cuenta actualizada exitosamente");
-    } else {
-      const newAcc: AccountItem = {
-        id: String(Date.now()),
-        name: saved.name!,
-        type: saved.type!,
-        balance: saved.balance || "0",
-        currency: saved.currency || "USD",
-        isActive: true,
-        creditLimit: saved.creditLimit,
-        availableCredit: saved.availableCredit,
-        statementDay: saved.statementDay,
-        paymentDueDay: saved.paymentDueDay,
-        minimumPayment: saved.minimumPayment,
-      };
-      setAccounts(prev => [newAcc, ...prev]);
-      toast.success("Cuenta creada exitosamente");
+  const handleSaveAccount = async (saved: Partial<AccountItem>) => {
+    try {
+      if (saved.id) {
+        await updateAccount(saved.id, {
+          name: saved.name,
+          type: saved.type as any,
+          balance: saved.balance !== undefined ? parseFloat(saved.balance) : undefined,
+          currency: saved.currency,
+          creditLimit: saved.creditLimit ? parseFloat(saved.creditLimit) : undefined,
+          statementDay: saved.statementDay ? Number(saved.statementDay) : undefined,
+          paymentDueDay: saved.paymentDueDay ? Number(saved.paymentDueDay) : undefined,
+          minimumPayment: saved.minimumPayment ? parseFloat(saved.minimumPayment) : undefined,
+        });
+        setAccounts(prev => prev.map(a => a.id === saved.id ? { ...a, ...saved } as AccountItem : a));
+        toast.success("Cuenta actualizada exitosamente");
+      } else {
+        const res = await createAccount({
+          name: saved.name!,
+          type: (saved.type as any) || "checking",
+          balance: saved.balance ? parseFloat(saved.balance) : 0,
+          currency: saved.currency || "USD",
+          creditLimit: saved.creditLimit ? parseFloat(saved.creditLimit) : undefined,
+          statementDay: saved.statementDay ? Number(saved.statementDay) : undefined,
+          paymentDueDay: saved.paymentDueDay ? Number(saved.paymentDueDay) : undefined,
+          minimumPayment: saved.minimumPayment ? parseFloat(saved.minimumPayment) : undefined,
+        });
+        const created = res.account;
+        const newAcc: AccountItem = {
+          id: created.id,
+          name: created.name,
+          type: created.type,
+          balance: String(created.balance),
+          currency: created.currency,
+          isActive: true,
+          creditLimit: created.creditLimit ? String(created.creditLimit) : null,
+          availableCredit: created.availableCredit ? String(created.availableCredit) : null,
+          statementDay: created.statementDay,
+          paymentDueDay: created.paymentDueDay,
+          minimumPayment: created.minimumPayment ? String(created.minimumPayment) : null,
+        };
+        setAccounts(prev => [newAcc, ...prev]);
+        toast.success("Cuenta creada exitosamente");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al guardar la cuenta");
     }
     setEditingAccount(null);
   };
 
-  const handleDelete = (id: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar la cuenta "${name}"?`)) {
-      setAccounts(prev => prev.filter(a => a.id !== id));
-      toast.info(`Cuenta "${name}" eliminada`);
+      try {
+        await deleteAccount(id);
+        setAccounts(prev => prev.filter(a => a.id !== id));
+        toast.info(`Cuenta "${name}" eliminada`);
+      } catch (err: any) {
+        toast.error(err?.message || "Error al eliminar la cuenta");
+      }
     }
   };
 

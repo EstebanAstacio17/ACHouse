@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   FileSpreadsheet, FileText, Download, Calendar, DollarSign,
   TrendingUp, TrendingDown, ArrowUpDown, PiggyBank, Check, AlertCircle,
@@ -16,15 +16,8 @@ import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
-
-// ─── Initial Empty Data ────────────────────────────────────────────────────────
-const MONTHLY_SERIES: Array<{ month: string; ingresos: number; egresos: number; flujo: number; patrimonio: number }> = [];
-
-const CATEGORY_BREAKDOWN: Array<{ category: string; amount: number; percentage: number; color: string }> = [];
-
-const RECONCILIATION_ACCOUNTS = [
-  { id: "1", name: "Cuenta Principal", expectedBalance: 0, currency: "USD" },
-];
+import { getTransactions } from "@/lib/actions/transactions";
+import { getAccounts } from "@/lib/actions/entities";
 
 const PAST_RECONCILIATIONS: Array<{ id: string; accountName: string; date: Date; expected: number; actual: number; diff: number; status: string }> = [];
 
@@ -32,30 +25,126 @@ export function ReportsClient() {
   const toast = useToast();
   const [tab, setTab] = useState<"reports" | "reconciliation">("reports");
   const [timeframe, setTimeframe] = useState<"month" | "quarter" | "year">("month");
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Reconciliation State
-  const [selectedAccId, setSelectedAccId] = useState("1");
+  const [selectedAccId, setSelectedAccId] = useState("");
   const [statementBalance, setStatementBalance] = useState("0");
   const [reconDate, setReconDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [reconNotes, setReconNotes] = useState("");
   const [reconciliations, setReconciliations] = useState(PAST_RECONCILIATIONS);
   const [reconSuccess, setReconSuccess] = useState(false);
 
-  const activeReconAccount = RECONCILIATION_ACCOUNTS.find(a => a.id === selectedAccId) || RECONCILIATION_ACCOUNTS[0];
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [txs, accs] = await Promise.all([
+          getTransactions({ perPage: 100 }),
+          getAccounts(),
+        ]);
+        setTransactions(txs);
+        setAccounts(accs);
+        if (accs.length > 0) {
+          setSelectedAccId(accs[0].id);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  const reconciliationAccounts = useMemo(() => {
+    return accounts.map(a => ({
+      id: a.id,
+      name: a.name,
+      expectedBalance: parseFloat(a.balance ?? "0"),
+      currency: a.currency ?? "USD",
+    }));
+  }, [accounts]);
+
+  const activeReconAccount = reconciliationAccounts.find(a => a.id === selectedAccId) || reconciliationAccounts[0] || {
+    id: "none",
+    name: "Sin cuentas",
+    expectedBalance: 0,
+    currency: "USD",
+  };
+
   const reconDifference = parseFloat(statementBalance || "0") - activeReconAccount.expectedBalance;
   const isMatched = Math.abs(reconDifference) < 0.01;
 
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+  const totalIncome = useMemo(() => {
+    return transactions.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+  }, [transactions]);
+
+  const totalExpense = useMemo(() => {
+    return transactions.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+  }, [transactions]);
+
+  const netFlow = totalIncome - totalExpense;
+  const savingsRate = totalIncome > 0 ? ((netFlow / totalIncome) * 100) : 0;
+
+  const categoryBreakdown = useMemo(() => {
+    const expenses = transactions.filter(t => t.type === "expense");
+    const catMap = new Map<string, { amount: number; color: string }>();
+
+    expenses.forEach(t => {
+      const name = t.category?.name || "Otros Gastos";
+      const color = t.category?.color || "#64748b";
+      const amt = parseFloat(t.amount || "0");
+      const existing = catMap.get(name) || { amount: 0, color };
+      catMap.set(name, { amount: existing.amount + amt, color });
+    });
+
+    const total = Array.from(catMap.values()).reduce((s, c) => s + c.amount, 0);
+
+    return Array.from(catMap.entries()).map(([category, info]) => ({
+      category,
+      amount: info.amount,
+      percentage: total > 0 ? Math.round((info.amount / total) * 100) : 0,
+      color: info.color,
+    })).sort((a, b) => b.amount - a.amount);
+  }, [transactions]);
+
+  const monthlySeries = useMemo(() => {
+    const monthMap = new Map<string, { ingresos: number; egresos: number }>();
+
+    transactions.forEach(t => {
+      const monthKey = format(new Date(t.date), "MMM yyyy", { locale: es });
+      const current = monthMap.get(monthKey) || { ingresos: 0, egresos: 0 };
+      const amt = parseFloat(t.amount || "0");
+      if (t.type === "income") current.ingresos += amt;
+      if (t.type === "expense") current.egresos += amt;
+      monthMap.set(monthKey, current);
+    });
+
+    let runningPatrimonio = accounts.reduce((s, a) => s + parseFloat(a.balance ?? "0"), 0);
+
+    return Array.from(monthMap.entries()).map(([month, data]) => ({
+      month,
+      ingresos: data.ingresos,
+      egresos: data.egresos,
+      flujo: data.ingresos - data.egresos,
+      patrimonio: runningPatrimonio,
+    }));
+  }, [transactions, accounts]);
+
   // Export to Excel
   const exportExcel = () => {
-    const data = CATEGORY_BREAKDOWN.map(c => ({
+    const data = categoryBreakdown.map(c => ({
       Categoría: c.category,
       Monto: c.amount,
       Porcentaje: `${c.percentage}%`,
     }));
 
-    const ws = XLSX.utils.json_to_sheet(data);
+    const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ Info: "Sin gastos registrados" }]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Gastos por Categoría");
     XLSX.writeFile(wb, `Reporte_Financiero_ACHouse_${format(new Date(), "yyyyMMdd")}.xlsx`);
@@ -70,22 +159,24 @@ export function ReportsClient() {
 
     doc.setFontSize(10);
     doc.text(`Fecha de emisión: ${format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: es })}`, 14, 28);
-    doc.text("Hogar: Mi Hogar · Moneda: USD", 14, 34);
+    doc.text("Hogar: ACHouse · Moneda: USD", 14, 34);
 
     // Summary block
     doc.setFontSize(12);
     doc.text("Resumen General", 14, 46);
     doc.setFontSize(10);
-    doc.text(`Total Ingresos: $12,800.00`, 14, 54);
-    doc.text(`Total Egresos: $7,340.50`, 14, 60);
-    doc.text(`Flujo Neto: +$5,459.50`, 14, 66);
-    doc.text(`Tasa de Ahorro: 42.6%`, 14, 72);
+    doc.text(`Total Ingresos: $${totalIncome.toLocaleString()}`, 14, 54);
+    doc.text(`Total Egresos: $${totalExpense.toLocaleString()}`, 14, 60);
+    doc.text(`Flujo Neto: ${netFlow >= 0 ? "+" : ""}$${netFlow.toLocaleString()}`, 14, 66);
+    doc.text(`Tasa de Ahorro: ${savingsRate.toFixed(1)}%`, 14, 72);
 
     // Table
     autoTable(doc, {
       startY: 80,
       head: [["Categoría", "Monto (USD)", "Distribución %"]],
-      body: CATEGORY_BREAKDOWN.map(c => [c.category, `$${c.amount.toLocaleString()}`, `${c.percentage}%`]),
+      body: categoryBreakdown.length > 0
+        ? categoryBreakdown.map(c => [c.category, `$${c.amount.toLocaleString()}`, `${c.percentage}%`])
+        : [["Sin datos", "$0.00", "0%"]],
       theme: "striped",
       headStyles: { fillColor: [99, 102, 241] },
     });
@@ -152,19 +243,21 @@ export function ReportsClient() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem" }}>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Ingresos Totales</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-income)" }}>$0.00</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-income)" }}>${totalIncome.toLocaleString()}</p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Gastos Totales</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-expense)" }}>$0.00</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-expense)" }}>${totalExpense.toLocaleString()}</p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Flujo Neto</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)" }}>$0.00</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: netFlow >= 0 ? "var(--color-income)" : "var(--color-expense)" }}>
+                {netFlow >= 0 ? "+" : ""}${netFlow.toLocaleString()}
+              </p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Tasa de Ahorro</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)" }}>0.0%</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)" }}>{savingsRate.toFixed(1)}%</p>
             </div>
           </div>
 
@@ -174,10 +267,10 @@ export function ReportsClient() {
               Evolución de Ingresos, Egresos y Patrimonio Neto
             </h3>
             <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-              Histórico consolidado semestral
+              Histórico consolidado
             </p>
             <div style={{ width: "100%", height: 300 }}>
-              {MONTHLY_SERIES.length === 0 ? (
+              {monthlySeries.length === 0 ? (
                 <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", gap: "0.5rem" }}>
                   <TrendingUp size={32} style={{ opacity: 0.3 }} />
                   <p style={{ fontSize: "0.875rem", fontWeight: 600 }}>Sin historial de movimientos suficiente</p>
@@ -185,7 +278,7 @@ export function ReportsClient() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={MONTHLY_SERIES} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <AreaChart data={monthlySeries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="var(--color-income)" stopOpacity={0.4} />
@@ -226,14 +319,14 @@ export function ReportsClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {CATEGORY_BREAKDOWN.length === 0 ? (
+                  {categoryBreakdown.length === 0 ? (
                     <tr>
                       <td colSpan={3} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--text-secondary)" }}>
                         No hay gastos clasificados por categoría en este periodo.
                       </td>
                     </tr>
                   ) : (
-                    CATEGORY_BREAKDOWN.map(c => (
+                    categoryBreakdown.map(c => (
                       <tr key={c.category}>
                         <td>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", fontWeight: 600 }}>
@@ -278,11 +371,11 @@ export function ReportsClient() {
                   value={selectedAccId}
                   onChange={e => {
                     setSelectedAccId(e.target.value);
-                    const acc = RECONCILIATION_ACCOUNTS.find(a => a.id === e.target.value);
+                    const acc = reconciliationAccounts.find(a => a.id === e.target.value);
                     if (acc) setStatementBalance(String(acc.expectedBalance));
                   }}
                 >
-                  {RECONCILIATION_ACCOUNTS.map(a => (
+                  {reconciliationAccounts.map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>

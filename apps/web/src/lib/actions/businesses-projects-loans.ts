@@ -6,18 +6,12 @@ import { businesses, businessTransactions, projects, projectTransactions, loans,
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { cookies } from "next/headers";
+import { getActiveHouseholdId } from "@/lib/household";
 
-async function getHouseholdId() {
-  const cookieStore = await cookies();
-  const hid = cookieStore.get("household_id")?.value;
-  if (!hid) throw new Error("No active household");
-  return hid;
-}
 async function getAuthContext() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
-  const householdId = await getHouseholdId();
+  const householdId = await getActiveHouseholdId();
   return { userId, householdId };
 }
 
@@ -110,6 +104,13 @@ export async function updateProject(id: string, data: Partial<{
   return { success: true };
 }
 
+export async function deleteProject(id: string) {
+  const { householdId } = await getAuthContext();
+  await db.update(projects).set({ deletedAt: new Date() }).where(and(eq(projects.id, id), eq(projects.householdId, householdId)));
+  revalidatePath("/dashboard/projects");
+  return { success: true };
+}
+
 // ── Loans ─────────────────────────────────────────────────────────────────────
 
 export async function getLoans() {
@@ -172,7 +173,14 @@ export async function registerLoanPayment(loanId: string, data: {
   return { success: true, payment };
 }
 
-export function calculateAmortization(
+export async function deleteLoan(id: string) {
+  const { householdId } = await getAuthContext();
+  await db.update(loans).set({ deletedAt: new Date(), isActive: false }).where(and(eq(loans.id, id), eq(loans.householdId, householdId)));
+  revalidatePath("/dashboard/loans");
+  return { success: true };
+}
+
+export async function calculateAmortization(
   principal: number, annualRate: number, monthlyPayment: number, startDate: Date
 ) {
   const rows = [];

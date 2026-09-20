@@ -6,19 +6,12 @@ import { categories, accounts, householdMembers } from "@achouse/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { cookies } from "next/headers";
-
-async function getHouseholdId() {
-  const cookieStore = await cookies();
-  const hid = cookieStore.get("household_id")?.value;
-  if (!hid) throw new Error("No active household");
-  return hid;
-}
+import { getActiveHouseholdId } from "@/lib/household";
 
 async function getAuthContext() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
-  const householdId = await getHouseholdId();
+  const householdId = await getActiveHouseholdId();
   return { userId, householdId };
 }
 

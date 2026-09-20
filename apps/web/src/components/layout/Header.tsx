@@ -49,7 +49,47 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
   const searchRef = useRef<HTMLInputElement>(null);
   const notifRef  = useRef<HTMLDivElement>(null);
 
+  const [householdsList, setHouseholdsList] = useState<Array<{ id: string; name: string; role?: string }>>([]);
+  const [currentHouseholdName, setCurrentHouseholdName] = useState(householdName);
+  const [showHouseholdMenu, setShowHouseholdMenu] = useState(false);
+  const householdMenuRef = useRef<HTMLDivElement>(null);
+
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  /* ── Fetch user households ── */
+  useEffect(() => {
+    fetch("/api/households")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.households && data.households.length > 0) {
+          setHouseholdsList(data.households);
+          const active = data.households.find((h: any) => h.id === data.activeHouseholdId) || data.households[0];
+          if (active) {
+            setCurrentHouseholdName(active.name);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSelectHousehold = (h: { id: string; name: string }) => {
+    document.cookie = `household_id=${h.id}; path=/; max-age=31536000; SameSite=Lax`;
+    setCurrentHouseholdName(h.name);
+    setShowHouseholdMenu(false);
+    router.refresh();
+  };
+
+  /* ── Close household dropdown on outside click ── */
+  useEffect(() => {
+    if (!showHouseholdMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (householdMenuRef.current && !householdMenuRef.current.contains(e.target as Node)) {
+        setShowHouseholdMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showHouseholdMenu]);
 
   /* ── Theme sync & persistence ── */
   useEffect(() => {
@@ -147,27 +187,97 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
         </button>
 
         {/* Household switcher */}
-        <button className="household-switcher" id="household-switcher-btn">
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: "var(--accent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "0.7rem",
-              flexShrink: 0,
-            }}
+        <div style={{ position: "relative" }} ref={householdMenuRef}>
+          <button
+            className="household-switcher"
+            id="household-switcher-btn"
+            onClick={() => setShowHouseholdMenu((s) => !s)}
           >
-            🏠
-          </div>
-          <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>
-            {householdName}
-          </span>
-          <ChevronDown size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
-        </button>
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                background: "var(--accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "0.7rem",
+                flexShrink: 0,
+              }}
+            >
+              🏠
+            </div>
+            <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>
+              {currentHouseholdName}
+            </span>
+            <ChevronDown size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+          </button>
+
+          {showHouseholdMenu && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                width: 230,
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow-xl)",
+                padding: "0.375rem",
+                zIndex: 100,
+              }}
+            >
+              <div style={{ padding: "0.375rem 0.625rem", fontSize: "0.6875rem", fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase" }}>
+                Mis Hogares
+              </div>
+              {householdsList.map((h) => (
+                <button
+                  key={h.id}
+                  onClick={() => handleSelectHousehold(h)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    width: "100%",
+                    padding: "0.5rem 0.625rem",
+                    background: h.name === currentHouseholdName ? "var(--bg-hover)" : "transparent",
+                    border: "none",
+                    borderRadius: "var(--radius-md)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: "var(--text-primary)",
+                    fontSize: "0.8125rem",
+                    fontWeight: h.name === currentHouseholdName ? 700 : 500,
+                  }}
+                >
+                  <Home size={14} color="var(--accent)" />
+                  <span style={{ flex: 1 }} className="truncate">{h.name}</span>
+                  {h.name === currentHouseholdName && <CheckCircle2 size={13} color="var(--color-income)" />}
+                </button>
+              ))}
+              <div style={{ borderTop: "1px solid var(--border-hair)", margin: "0.25rem 0" }} />
+              <Link
+                href="/onboarding"
+                onClick={() => setShowHouseholdMenu(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  padding: "0.5rem 0.625rem",
+                  color: "var(--accent)",
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  borderRadius: "var(--radius-md)",
+                }}
+              >
+                + Crear otro hogar
+              </Link>
+            </div>
+          )}
+        </div>
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />

@@ -7,63 +7,13 @@ import {
 import Link from "next/link";
 import { MonthlyCashflowChart } from "@/components/charts/MonthlyCashflowChart";
 import { CategoryDonutChart }  from "@/components/charts/CategoryDonutChart";
+import { getAccounts } from "@/lib/actions/entities";
+import { getTransactions } from "@/lib/actions/transactions";
 
 export const metadata: Metadata = {
   title: "Dashboard",
   description: "Panel principal de finanzas familiares ACHouse",
 };
-
-/* ── Initial Empty State Data ────────────────────────────────────────── */
-const kpis = [
-  {
-    label: "Balance Total",
-    value: "$0.00",
-    change: "0.0%",
-    positive: true,
-    icon: Wallet,
-    color: "var(--accent)",
-    bg: "var(--accent-subtle)",
-    border: "var(--accent-glow)",
-    sub: "Todas las cuentas",
-  },
-  {
-    label: "Ingresos del Mes",
-    value: "$0.00",
-    change: "0.0%",
-    positive: true,
-    icon: TrendingUp,
-    color: "var(--color-income)",
-    bg: "var(--color-income-dim)",
-    border: "var(--color-income-dim)",
-    sub: "vs mes anterior",
-  },
-  {
-    label: "Gastos del Mes",
-    value: "$0.00",
-    change: "0.0%",
-    positive: true,
-    icon: TrendingDown,
-    color: "var(--color-expense)",
-    bg: "var(--color-expense-dim)",
-    border: "var(--color-expense-dim)",
-    sub: "vs mes anterior",
-  },
-  {
-    label: "Flujo Neto",
-    value: "$0.00",
-    change: "0.0%",
-    positive: true,
-    icon: ArrowUpDown,
-    color: "var(--color-warning)",
-    bg: "var(--color-warning-dim)",
-    border: "var(--color-warning-dim)",
-    sub: "Ingresos − Gastos",
-  },
-];
-
-const recentTransactions: Array<{ id: string; description: string; category: string; amount: number; date: string; member: string; type: "income" | "expense" }> = [];
-
-const upcomingAlerts: Array<{ label: string; date: string; days: number; type: "warning" | "info" }> = [];
 
 const quickActions = [
   { label: "Nueva Transacción",  icon: Plus,     href: "/dashboard/transactions",  color: "var(--accent)",        bg: "var(--accent-subtle)" },
@@ -78,7 +28,110 @@ const CIRCUMFERENCE = 2 * Math.PI * 44;
 const DASH = (HEALTH_SCORE / 100) * CIRCUMFERENCE;
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  let accountsList: any[] = [];
+  let txList: any[] = [];
+
+  try {
+    const [accs, txs] = await Promise.all([
+      getAccounts(),
+      getTransactions({ perPage: 100 }),
+    ]);
+    accountsList = accs || [];
+    txList = txs || [];
+  } catch {
+    // If not onboarded yet
+  }
+
+  const totalBalance = accountsList.reduce((sum, a) => sum + parseFloat(a.balance || "0"), 0);
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const thisMonthTxs = txList.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const monthIncome = thisMonthTxs
+    .filter(t => t.type === "income")
+    .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+  const monthExpense = thisMonthTxs
+    .filter(t => t.type === "expense")
+    .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+  const netFlow = monthIncome - monthExpense;
+
+  const fmtCurrency = (n: number) =>
+    n.toLocaleString("es-HN", { style: "currency", currency: "USD" });
+
+  const kpis = [
+    {
+      label: "Balance Total",
+      value: fmtCurrency(totalBalance),
+      change: accountsList.length > 0 ? `${accountsList.length} cuentas` : "Sin cuentas",
+      positive: totalBalance >= 0,
+      icon: Wallet,
+      color: "var(--accent)",
+      bg: "var(--accent-subtle)",
+      border: "var(--accent-glow)",
+      sub: "Todas las cuentas",
+    },
+    {
+      label: "Ingresos del Mes",
+      value: fmtCurrency(monthIncome),
+      change: `${thisMonthTxs.filter(t => t.type === "income").length} ingresos`,
+      positive: true,
+      icon: TrendingUp,
+      color: "var(--color-income)",
+      bg: "var(--color-income-dim)",
+      border: "var(--color-income-dim)",
+      sub: "Mes actual",
+    },
+    {
+      label: "Gastos del Mes",
+      value: fmtCurrency(monthExpense),
+      change: `${thisMonthTxs.filter(t => t.type === "expense").length} gastos`,
+      positive: false,
+      icon: TrendingDown,
+      color: "var(--color-expense)",
+      bg: "var(--color-expense-dim)",
+      border: "var(--color-expense-dim)",
+      sub: "Mes actual",
+    },
+    {
+      label: "Flujo Neto",
+      value: fmtCurrency(netFlow),
+      change: netFlow >= 0 ? "Superávit" : "Déficit",
+      positive: netFlow >= 0,
+      icon: ArrowUpDown,
+      color: netFlow >= 0 ? "var(--color-income)" : "var(--color-warning)",
+      bg: netFlow >= 0 ? "var(--color-income-dim)" : "var(--color-warning-dim)",
+      border: netFlow >= 0 ? "var(--color-income-dim)" : "var(--color-warning-dim)",
+      sub: "Ingresos − Gastos",
+    },
+  ];
+
+  const recentTransactions = txList.slice(0, 5).map(t => ({
+    id: t.id,
+    description: t.description,
+    category: t.category?.name || "General",
+    amount: parseFloat(t.amount || "0"),
+    date: new Date(t.date).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }),
+    member: t.member?.displayName || "Hogar",
+    type: t.type as "income" | "expense",
+  }));
+
+  const upcomingAlerts: Array<{ label: string; date: string; days: number; type: "warning" | "info" }> = accountsList
+    .filter(a => a.type === "credit" && a.paymentDueDay)
+    .map(a => ({
+      label: `Pago Tarjeta: ${a.name}`,
+      date: `Día ${a.paymentDueDay} de cada mes`,
+      days: Math.max(1, (a.paymentDueDay! - now.getDate() + 30) % 30),
+      type: "warning" as const,
+    }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 

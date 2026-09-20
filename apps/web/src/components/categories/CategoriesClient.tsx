@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Tag, ChevronRight, Pencil, Trash2, X, Check, Layers } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
+import { getCategories, createCategory, deleteCategory } from "@/lib/actions/entities";
 
 export interface CategoryChild {
   id: string;
@@ -187,6 +188,42 @@ export function CategoriesClient() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
 
+  useEffect(() => {
+    let active = true;
+    getCategories()
+      .then((data) => {
+        if (active && data) {
+          const parents = data.filter((c: any) => !c.parentId);
+          const children = data.filter((c: any) => c.parentId);
+
+          const formatted: CategoryItem[] = parents.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            type: p.type as any,
+            color: p.color,
+            icon: p.icon,
+            parentId: null,
+            children: children
+              .filter((c: any) => c.parentId === p.id)
+              .map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                type: c.type as any,
+                color: c.color,
+                icon: c.icon,
+                parentId: c.parentId,
+              })),
+          }));
+
+          setCategories(formatted);
+        }
+      })
+      .catch((err) => console.error("Error loading categories:", err));
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const filtered = categories.filter(c => filterType === "all" || c.type === filterType);
 
   const toggle = (id: string) => setExpanded(s => { const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns; });
@@ -197,61 +234,82 @@ export function CategoriesClient() {
     setShowModal(true);
   };
 
-  const handleSaveCategory = (catData: { name: string; type: "income" | "expense"; color: string; icon: string; parentId?: string | null }) => {
-    if (catData.parentId) {
-      // Subcategory
-      setCategories(prev =>
-        prev.map(p => {
-          if (p.id === catData.parentId) {
-            const newChild: CategoryChild = {
-              id: String(Date.now()),
-              name: catData.name,
-              type: catData.type,
-              color: catData.color,
-              icon: catData.icon,
-              parentId: catData.parentId,
-            };
-            return { ...p, children: [...p.children, newChild] };
-          }
-          return p;
-        })
-      );
-      setExpanded(s => new Set(s).add(catData.parentId!));
-      toast.success(`Subcategoría "${catData.name}" añadida`);
-    } else {
-      // Top level category
-      const newCat: CategoryItem = {
-        id: String(Date.now()),
+  const handleSaveCategory = async (catData: { name: string; type: "income" | "expense"; color: string; icon: string; parentId?: string | null }) => {
+    try {
+      const res = await createCategory({
         name: catData.name,
         type: catData.type,
         color: catData.color,
         icon: catData.icon,
-        parentId: null,
-        children: [],
-      };
-      setCategories(prev => [newCat, ...prev]);
-      toast.success(`Categoría "${catData.name}" creada exitosamente`);
+        parentId: catData.parentId ?? null,
+      });
+      const created = res.category;
+
+      if (catData.parentId) {
+        setCategories(prev =>
+          prev.map(p => {
+            if (p.id === catData.parentId) {
+              const newChild: CategoryChild = {
+                id: created.id,
+                name: created.name,
+                type: created.type as any,
+                color: created.color,
+                icon: created.icon,
+                parentId: catData.parentId!,
+              };
+              return { ...p, children: [...p.children, newChild] };
+            }
+            return p;
+          })
+        );
+        setExpanded(s => new Set(s).add(catData.parentId!));
+        toast.success(`Subcategoría "${catData.name}" añadida`);
+      } else {
+        const newCat: CategoryItem = {
+          id: created.id,
+          name: created.name,
+          type: created.type as any,
+          color: created.color,
+          icon: created.icon,
+          parentId: null,
+          children: [],
+        };
+        setCategories(prev => [newCat, ...prev]);
+        toast.success(`Categoría "${catData.name}" creada exitosamente`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al guardar categoría");
     }
   };
 
-  const handleDeleteCategory = (id: string, name: string) => {
+  const handleDeleteCategory = async (id: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar la categoría "${name}"?`)) {
-      setCategories(prev => prev.filter(c => c.id !== id));
-      toast.info(`Categoría "${name}" eliminada`);
+      try {
+        await deleteCategory(id);
+        setCategories(prev => prev.filter(c => c.id !== id));
+        toast.info(`Categoría "${name}" eliminada`);
+      } catch (err: any) {
+        toast.error(err?.message || "Error al eliminar categoría");
+      }
     }
   };
 
-  const handleDeleteSubcategory = (parentId: string, childId: string, name: string) => {
+  const handleDeleteSubcategory = async (parentId: string, childId: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar la subcategoría "${name}"?`)) {
-      setCategories(prev =>
-        prev.map(p => {
-          if (p.id === parentId) {
-            return { ...p, children: p.children.filter(c => c.id !== childId) };
-          }
-          return p;
-        })
-      );
-      toast.info(`Subcategoría "${name}" eliminada`);
+      try {
+        await deleteCategory(childId);
+        setCategories(prev =>
+          prev.map(p => {
+            if (p.id === parentId) {
+              return { ...p, children: p.children.filter(c => c.id !== childId) };
+            }
+            return p;
+          })
+        );
+        toast.info(`Subcategoría "${name}" eliminada`);
+      } catch (err: any) {
+        toast.error(err?.message || "Error al eliminar subcategoría");
+      }
     }
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Plus, CreditCard, Banknote, User, Building2, Calendar, DollarSign,
   CheckCircle2, AlertCircle, ArrowRight, ArrowDownRight, Clock,
@@ -9,6 +9,9 @@ import {
 import { format, addMonths } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
+import { getLoans, createLoan, registerLoanPayment, deleteLoan } from "@/lib/actions/businesses-projects-loans";
+import { getAccounts, createAccount, deleteAccount, updateAccount, getMembers } from "@/lib/actions/entities";
+import { createTransaction } from "@/lib/actions/transactions";
 
 // ─── Types & Demo Data ─────────────────────────────────────────────────────────
 export interface LoanItem {
@@ -51,9 +54,11 @@ const PAYING_ACCOUNTS = [
 function LoanModal({
   onClose,
   onSave,
+  members = [],
 }: {
   onClose: () => void;
   onSave: (loan: Partial<LoanItem>) => void;
+  members?: Array<{ id: string; name: string }>;
 }) {
   const [name, setName] = useState("");
   const [lenderType, setLenderType] = useState<"bank" | "person" | "internal_member">("bank");
@@ -85,8 +90,8 @@ function LoanModal({
     onSave({
       name,
       lenderType,
-      lenderName: lenderType === "bank" || lenderType === "person" ? lenderName : "Ana M.",
-      borrowerName: lenderType === "internal_member" ? borrowerName || "Carlos R." : null,
+      lenderName: lenderType === "bank" || lenderType === "person" ? lenderName : lenderName || (members[0]?.name ?? null),
+      borrowerName: lenderType === "internal_member" ? borrowerName || (members[1]?.name ?? members[0]?.name ?? null) : null,
       principalAmount: p,
       remainingBalance: p,
       interestRate: parseFloat(rate) || 0,
@@ -139,15 +144,19 @@ function LoanModal({
                 <div className="form-group">
                   <label className="label">Prestamista (Miembro)</label>
                   <select className="input" value={lenderName} onChange={e => setLenderName(e.target.value)}>
-                    <option value="Ana M.">Ana M.</option>
-                    <option value="Carlos R.">Carlos R.</option>
+                    <option value="">Selecciona miembro...</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="form-group">
                   <label className="label">Prestatario (Miembro)</label>
                   <select className="input" value={borrowerName} onChange={e => setBorrowerName(e.target.value)}>
-                    <option value="Carlos R.">Carlos R.</option>
-                    <option value="Ana M.">Ana M.</option>
+                    <option value="">Selecciona miembro...</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -348,13 +357,15 @@ function PayLoanModal({
   loan,
   onClose,
   onPay,
+  accounts = [],
 }: {
   loan: LoanItem;
   onClose: () => void;
   onPay: (loanId: string, amount: number, accountId: string) => void;
+  accounts?: Array<{ id: string; name: string; balance: number }>;
 }) {
   const [amount, setAmount] = useState(String(loan.monthlyPayment.toFixed(2)));
-  const [accountId, setAccountId] = useState("a1");
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,7 +387,7 @@ function PayLoanModal({
             <div className="form-group">
               <label className="label">Cuenta de débito</label>
               <select className="input" value={accountId} onChange={e => setAccountId(e.target.value)}>
-                {PAYING_ACCOUNTS.map(a => (
+                {accounts.map(a => (
                   <option key={a.id} value={a.id}>{a.name} (Saldo: ${a.balance.toLocaleString()})</option>
                 ))}
               </select>
@@ -412,14 +423,16 @@ function PayCardModal({
   card,
   onClose,
   onPay,
+  accounts = [],
 }: {
   card: CreditCardItem;
   onClose: () => void;
   onPay: (cardId: string, amount: number, accountId: string) => void;
+  accounts?: Array<{ id: string; name: string; balance: number }>;
 }) {
   const [payType, setPayType] = useState<"total" | "minimum" | "custom">("total");
   const [customAmount, setCustomAmount] = useState("");
-  const [accountId, setAccountId] = useState("a1");
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
 
   const finalAmount = payType === "total" ? card.balance : payType === "minimum" ? card.minimumPayment : parseFloat(customAmount) || 0;
 
@@ -442,7 +455,7 @@ function PayCardModal({
             <div className="form-group">
               <label className="label">Cuenta de origen</label>
               <select className="input" value={accountId} onChange={e => setAccountId(e.target.value)}>
-                {PAYING_ACCOUNTS.map(a => (
+                {accounts.map(a => (
                   <option key={a.id} value={a.id}>{a.name} (Saldo: ${a.balance.toLocaleString()})</option>
                 ))}
               </select>
@@ -593,11 +606,82 @@ export function LoansClient() {
   const [tab, setTab] = useState<"loans" | "cards">("loans");
   const [loans, setLoans] = useState<LoanItem[]>(INITIAL_LOANS);
   const [cards, setCards] = useState<CreditCardItem[]>(INITIAL_CARDS);
+  const [payingAccounts, setPayingAccounts] = useState<Array<{ id: string; name: string; balance: number }>>([]);
+  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
+  const [loading, setLoading] = useState(true);
   const [showNewLoanModal, setShowNewLoanModal] = useState(false);
   const [showNewCardModal, setShowNewCardModal] = useState(false);
   const [payingLoan, setPayingLoan] = useState<LoanItem | null>(null);
   const [payingCard, setPayingCard] = useState<CreditCardItem | null>(null);
   const [amortizationLoan, setAmortizationLoan] = useState<LoanItem | null>(null);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [dbLoans, dbAccounts, dbMembers] = await Promise.all([
+        getLoans(),
+        getAccounts(),
+        getMembers(),
+      ]);
+
+      setLoans(
+        dbLoans.map((l: any) => ({
+          id: l.id,
+          name: l.name,
+          lenderType: l.lenderType,
+          lenderName: l.lenderName || (l.lenderMember?.displayName ?? null),
+          borrowerName: l.borrowerMember?.displayName ?? null,
+          principalAmount: parseFloat(l.principalAmount ?? "0"),
+          remainingBalance: parseFloat(l.remainingBalance ?? "0"),
+          interestRate: parseFloat(l.interestRate ?? "0"),
+          interestType: l.interestType ?? "fixed",
+          monthlyPayment: parseFloat(l.monthlyPayment ?? "0"),
+          startDate: new Date(l.startDate),
+          endDate: l.endDate ? new Date(l.endDate) : new Date(l.startDate),
+          currency: l.currency ?? "USD",
+        }))
+      );
+
+      const creditAccounts = dbAccounts.filter((a: any) => a.type === "credit");
+      setCards(
+        creditAccounts.map((c: any) => {
+          const limit = parseFloat(c.creditLimit ?? "5000");
+          const bal = parseFloat(c.balance ?? "0");
+          return {
+            id: c.id,
+            name: c.name,
+            balance: bal,
+            creditLimit: limit,
+            availableCredit: parseFloat(c.availableCredit ?? String(Math.max(0, limit - bal))),
+            statementDay: c.statementDay ?? 15,
+            paymentDueDay: c.paymentDueDay ?? 25,
+            minimumPayment: parseFloat(c.minimumPayment ?? "50"),
+            currency: c.currency ?? "USD",
+          };
+        })
+      );
+
+      setPayingAccounts(
+        dbAccounts
+          .filter((a: any) => a.type !== "credit")
+          .map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            balance: parseFloat(a.balance ?? "0"),
+          }))
+      );
+
+      setMembers(dbMembers.map((m: any) => ({ id: m.id, name: m.displayName })));
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
@@ -605,89 +689,134 @@ export function LoansClient() {
   const totalCardDebt = cards.reduce((sum, c) => sum + c.balance, 0);
   const totalCombinedDebt = totalLoanDebt + totalCardDebt;
 
-  const handleSaveLoan = (newLoan: Partial<LoanItem>) => {
-    const item: LoanItem = {
-      id: String(Date.now()),
-      name: newLoan.name!,
-      lenderType: newLoan.lenderType!,
-      lenderName: newLoan.lenderName || null,
-      borrowerName: newLoan.borrowerName || null,
-      principalAmount: newLoan.principalAmount || 0,
-      remainingBalance: newLoan.remainingBalance || newLoan.principalAmount || 0,
-      interestRate: newLoan.interestRate || 0,
-      interestType: newLoan.interestType || "fixed",
-      monthlyPayment: newLoan.monthlyPayment || 0,
-      startDate: newLoan.startDate || new Date(),
-      endDate: newLoan.endDate || new Date(),
-      currency: "USD",
-    };
-    setLoans(prev => [item, ...prev]);
-    toast.success("Préstamo registrado exitosamente");
-  };
+  const handleSaveLoan = async (newLoan: Partial<LoanItem>) => {
+    try {
+      const lenderMember = members.find(m => m.name === newLoan.lenderName);
+      const borrowerMember = members.find(m => m.name === newLoan.borrowerName);
 
-  const handleSaveCard = (newCard: Partial<CreditCardItem>) => {
-    const item: CreditCardItem = {
-      id: `c_${Date.now()}`,
-      name: newCard.name!,
-      balance: newCard.balance ?? 0,
-      creditLimit: newCard.creditLimit ?? 5000,
-      availableCredit: newCard.availableCredit ?? 5000,
-      statementDay: newCard.statementDay ?? 15,
-      paymentDueDay: newCard.paymentDueDay ?? 25,
-      minimumPayment: newCard.minimumPayment ?? 50,
-      currency: "USD",
-    };
-    setCards(prev => [item, ...prev]);
-    toast.success(`Tarjeta "${item.name}" añadida exitosamente`);
-  };
-
-  const handlePayLoan = (loanId: string, amount: number) => {
-    setLoans(prev =>
-      prev.map(l => {
-        if (l.id === loanId) {
-          const newRemaining = Math.max(0, l.remainingBalance - amount);
-          return { ...l, remainingBalance: newRemaining };
-        }
-        return l;
-      })
-    );
-    toast.success(`Abono de $${amount.toFixed(2)} registrado al préstamo`);
-  };
-
-  const handlePayCard = (cardId: string, amount: number) => {
-    setCards(prev =>
-      prev.map(c => {
-        if (c.id === cardId) {
-          const newBal = Math.max(0, c.balance - amount);
-          const newAvail = Math.min(c.creditLimit, c.availableCredit + amount);
-          return { ...c, balance: newBal, availableCredit: newAvail };
-        }
-        return c;
-      })
-    );
-    toast.success(`Pago de $${amount.toFixed(2)} aplicado a la tarjeta`);
-  };
-
-  const handleDeleteLoan = (loanId: string, name: string) => {
-    if (window.confirm(`¿Seguro que deseas eliminar el préstamo "${name}"?`)) {
-      setLoans(prev => prev.filter(l => l.id !== loanId));
-      toast.info(`Préstamo "${name}" eliminado`);
+      await createLoan({
+        name: newLoan.name!,
+        lenderType: newLoan.lenderType!,
+        lenderName: newLoan.lenderType !== "internal_member" ? (newLoan.lenderName || undefined) : undefined,
+        lenderMemberId: lenderMember?.id,
+        borrowerMemberId: borrowerMember?.id,
+        principalAmount: newLoan.principalAmount || 0,
+        interestRate: newLoan.interestRate,
+        interestType: newLoan.interestType,
+        monthlyPayment: newLoan.monthlyPayment,
+        startDate: newLoan.startDate ? newLoan.startDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+        endDate: newLoan.endDate ? newLoan.endDate.toISOString().split("T")[0] : undefined,
+        currency: "USD",
+      });
+      toast.success("Préstamo registrado exitosamente");
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Error al crear préstamo");
     }
   };
 
-  const handleDeleteCard = (cardId: string, name: string) => {
+  const handleSaveCard = async (newCard: Partial<CreditCardItem>) => {
+    try {
+      await createAccount({
+        name: newCard.name!,
+        type: "credit",
+        balance: newCard.balance || 0,
+        currency: newCard.currency || "USD",
+        creditLimit: newCard.creditLimit,
+        statementDay: newCard.statementDay,
+        paymentDueDay: newCard.paymentDueDay,
+        minimumPayment: newCard.minimumPayment,
+      });
+      toast.success(`Tarjeta "${newCard.name}" añadida exitosamente`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Error al crear tarjeta");
+    }
+  };
+
+  const handlePayLoan = async (loanId: string, amount: number, accountId: string) => {
+    try {
+      await registerLoanPayment(loanId, {
+        amount,
+        principalPaid: amount,
+        interestPaid: 0,
+        date: new Date().toISOString().split("T")[0],
+        notes: "Abono cuota préstamo",
+      });
+
+      if (accountId) {
+        await createTransaction({
+          accountId,
+          type: "expense",
+          amount,
+          description: "Pago cuota de préstamo",
+          date: new Date().toISOString().split("T")[0],
+        });
+      }
+
+      toast.success(`Abono de $${amount.toFixed(2)} registrado al préstamo`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Error al procesar pago");
+    }
+  };
+
+  const handlePayCard = async (cardId: string, amount: number, accountId: string) => {
+    try {
+      if (accountId) {
+        await createTransaction({
+          accountId,
+          type: "expense",
+          amount,
+          description: "Pago a tarjeta de crédito",
+          date: new Date().toISOString().split("T")[0],
+        });
+      }
+
+      const card = cards.find(c => c.id === cardId);
+      if (card) {
+        await updateAccount(cardId, {
+          balance: Math.max(0, card.balance - amount),
+        });
+      }
+
+      toast.success(`Pago de $${amount.toFixed(2)} aplicado a la tarjeta`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Error al pagar tarjeta");
+    }
+  };
+
+  const handleDeleteLoan = async (loanId: string, name: string) => {
+    if (window.confirm(`¿Seguro que deseas eliminar el préstamo "${name}"?`)) {
+      try {
+        await deleteLoan(loanId);
+        toast.info(`Préstamo "${name}" eliminado`);
+        await loadData();
+      } catch (err: any) {
+        toast.error("Error al eliminar préstamo");
+      }
+    }
+  };
+
+  const handleDeleteCard = async (cardId: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar la tarjeta "${name}"?`)) {
-      setCards(prev => prev.filter(c => c.id !== cardId));
-      toast.info(`Tarjeta "${name}" eliminada`);
+      try {
+        await deleteAccount(cardId);
+        toast.info(`Tarjeta "${name}" eliminada`);
+        await loadData();
+      } catch (err: any) {
+        toast.error("Error al eliminar tarjeta");
+      }
     }
   };
 
   return (
     <>
-      {showNewLoanModal && <LoanModal onClose={() => setShowNewLoanModal(false)} onSave={handleSaveLoan} />}
+      {showNewLoanModal && <LoanModal onClose={() => setShowNewLoanModal(false)} onSave={handleSaveLoan} members={members} />}
       {showNewCardModal && <NewCardModal onClose={() => setShowNewCardModal(false)} onSave={handleSaveCard} />}
-      {payingLoan && <PayLoanModal loan={payingLoan} onClose={() => setPayingLoan(null)} onPay={handlePayLoan} />}
-      {payingCard && <PayCardModal card={payingCard} onClose={() => setPayingCard(null)} onPay={handlePayCard} />}
+      {payingLoan && <PayLoanModal loan={payingLoan} onClose={() => setPayingLoan(null)} onPay={handlePayLoan} accounts={payingAccounts} />}
+      {payingCard && <PayCardModal card={payingCard} onClose={() => setPayingCard(null)} onPay={handlePayCard} accounts={payingAccounts} />}
       {amortizationLoan && <AmortizationTableModal loan={amortizationLoan} onClose={() => setAmortizationLoan(null)} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>

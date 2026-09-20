@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, UserCircle, Shield, Eye, Pencil, Trash2, X, Check,
   Mail, Briefcase, TrendingUp, DollarSign, UserCheck, AlertCircle, Building2
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
+import { getMembers, updateMemberRole } from "@/lib/actions/entities";
 
 const ROLE_CONFIG = {
   admin: { label: "Administrador", color: "var(--accent)", Icon: Shield, bg: "var(--accent-subtle)" },
@@ -230,6 +231,38 @@ export function MembersClient() {
   const [members, setMembers] = useState<MemberItem[]>(INITIAL_MEMBERS);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeMemberForSource, setActiveMemberForSource] = useState<MemberItem | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getMembers()
+      .then((data) => {
+        if (active && data) {
+          setMembers(
+            data.map((m: any) => ({
+              id: m.id,
+              displayName: m.displayName || "Miembro",
+              role: (m.role as any) || "admin",
+              email: m.email || undefined,
+              avatarUrl: m.avatarUrl || null,
+              isActive: m.isActive ?? true,
+              incomeSources: (m.incomeSources || []).map((s: any) => ({
+                id: s.id,
+                name: s.name,
+                type: s.type,
+                expectedMonthlyAmount: String(s.expectedMonthlyAmount || "0"),
+                currency: s.currency || "USD",
+              })),
+              monthlyIncome: 0,
+              monthlyExpenses: 0,
+            }))
+          );
+        }
+      })
+      .catch((err) => console.error("Error loading members:", err));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 

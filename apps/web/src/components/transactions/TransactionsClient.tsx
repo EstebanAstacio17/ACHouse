@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Plus, Search, Filter, Download, ArrowUpCircle, ArrowDownCircle,
   ArrowLeftRight, Pencil, Trash2, ChevronLeft, ChevronRight,
@@ -11,6 +11,8 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ui/ToastContext";
+import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "@/lib/actions/transactions";
+import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
 
 // ─── Initial / Demo Data ───────────────────────────────────────────────────────
 export interface TransactionItem {
@@ -75,20 +77,26 @@ function TransactionModal({
   onClose,
   onSave,
   initialData,
+  categoriesList = [],
+  accountsList = [],
+  membersList = [],
 }: {
   onClose: () => void;
   onSave: (tx: Partial<TransactionItem>) => void;
   initialData?: TransactionItem | null;
+  categoriesList: Array<{ id: string; name: string; color?: string }>;
+  accountsList: Array<{ id: string; name: string }>;
+  membersList: Array<{ id: string; displayName: string }>;
 }) {
   const [form, setForm] = useState({
     type: initialData?.type ?? "expense",
     amount: initialData?.amount ?? "",
     description: initialData?.description ?? "",
     date: initialData ? format(initialData.date, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
-    categoryId: initialData?.category?.id || (CATEGORIES_LIST.find(c => c.name === initialData?.category?.name)?.id ?? ""),
-    accountId: initialData?.account?.id || (ACCOUNTS_LIST.find(a => a.name === initialData?.account?.name)?.id ?? "acc1"),
-    toAccountId: initialData?.toAccount?.id || "acc3",
-    memberId: initialData?.member?.id || (MEMBERS_LIST.find(m => m.displayName === initialData?.member?.displayName)?.id ?? "mem1"),
+    categoryId: initialData?.category?.id || (categoriesList.find(c => c.name === initialData?.category?.name)?.id ?? (categoriesList[0]?.id || "")),
+    accountId: initialData?.account?.id || (accountsList.find(a => a.name === initialData?.account?.name)?.id ?? (accountsList[0]?.id || "")),
+    toAccountId: initialData?.toAccount?.id || (accountsList[1]?.id || ""),
+    memberId: initialData?.member?.id || (membersList.find(m => m.displayName === initialData?.member?.displayName)?.id ?? (membersList[0]?.id || "")),
     status: initialData?.status ?? "cleared",
     isRecurring: initialData?.isRecurring ?? false,
     recurringFrequency: initialData?.recurringFrequency ?? "Mensual",
@@ -116,10 +124,10 @@ function TransactionModal({
     e.preventDefault();
     if (!form.amount || !form.description) return;
 
-    const selectedCat = CATEGORIES_LIST.find(c => c.id === form.categoryId);
-    const selectedAcc = ACCOUNTS_LIST.find(a => a.id === form.accountId);
-    const selectedToAcc = ACCOUNTS_LIST.find(a => a.id === form.toAccountId);
-    const selectedMem = MEMBERS_LIST.find(m => m.id === form.memberId);
+    const selectedCat = categoriesList.find(c => c.id === form.categoryId);
+    const selectedAcc = accountsList.find(a => a.id === form.accountId);
+    const selectedToAcc = accountsList.find(a => a.id === form.toAccountId);
+    const selectedMem = membersList.find(m => m.id === form.memberId);
 
     onSave({
       id: initialData?.id,
@@ -127,9 +135,9 @@ function TransactionModal({
       type: form.type as any,
       amount: parseFloat(form.amount).toFixed(2),
       currency: "USD",
-      date: new Date(form.date),
+      date: new Date(form.date + "T12:00:00"),
       status: form.status as any,
-      category: form.type === "transfer" ? null : (selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color } : null),
+      category: form.type === "transfer" ? null : (selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color || "#6366f1" } : null),
       account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : { name: "Principal" },
       toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
       member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
@@ -243,7 +251,7 @@ function TransactionModal({
                   {form.type === "transfer" ? "Cuenta Origen *" : "Cuenta *"}
                 </label>
                 <select className="input" value={form.accountId} onChange={e => set("accountId", e.target.value)}>
-                  {ACCOUNTS_LIST.map(a => (
+                  {accountsList.map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
@@ -257,7 +265,7 @@ function TransactionModal({
                     Cuenta Destino *
                   </label>
                   <select className="input" value={form.toAccountId} onChange={e => set("toAccountId", e.target.value)}>
-                    {ACCOUNTS_LIST.map(a => (
+                    {accountsList.map(a => (
                       <option key={a.id} value={a.id}>{a.name}</option>
                     ))}
                   </select>
@@ -270,7 +278,7 @@ function TransactionModal({
                   </label>
                   <select className="input" value={form.categoryId} onChange={e => set("categoryId", e.target.value)}>
                     <option value="">Sin categoría</option>
-                    {CATEGORIES_LIST.map(c => (
+                    {categoriesList.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -282,7 +290,7 @@ function TransactionModal({
             <div className="form-group">
               <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
               <select className="input" value={form.memberId} onChange={e => set("memberId", e.target.value)}>
-                {MEMBERS_LIST.map(m => (
+                {membersList.map(m => (
                   <option key={m.id} value={m.id}>{m.displayName}</option>
                 ))}
               </select>
@@ -348,6 +356,9 @@ function TransactionModal({
 export function TransactionsClient() {
   const toast = useToast();
   const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
+  const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
@@ -359,6 +370,49 @@ export function TransactionsClient() {
   const [datePreset, setDatePreset] = useState<"all" | "thisMonth" | "today">("all");
   const [page, setPage] = useState(1);
   const perPage = 8;
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getTransactions({ perPage: 100 }),
+      getAccounts(),
+      getCategories(),
+      getMembers(),
+    ]).then(([txs, accs, cats, mems]) => {
+      if (!active) return;
+      if (accs) {
+        setAccountsList(accs.map((a: any) => ({ id: a.id, name: a.name })));
+      }
+      if (cats) {
+        setCategoriesList(cats.map((c: any) => ({ id: c.id, name: c.name, color: c.color })));
+      }
+      if (mems) {
+        setMembersList(mems.map((m: any) => ({ id: m.id, displayName: m.displayName })));
+      }
+      if (txs) {
+        setTransactionsList(
+          txs.map((t: any) => ({
+            id: t.id,
+            description: t.description,
+            type: t.type as any,
+            amount: String(t.amount),
+            currency: "USD",
+            date: new Date(t.date),
+            status: t.status as any,
+            category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
+            account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
+            toAccount: t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null,
+            member: t.member ? { id: t.member.id, displayName: t.member.displayName } : null,
+            isRecurring: t.isRecurring,
+            notes: t.notes,
+          }))
+        );
+      }
+    }).catch(err => console.error("Error loading transactions:", err));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Filter logic
   const filtered = useMemo(() => {
@@ -397,40 +451,66 @@ export function TransactionsClient() {
 
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-  const handleSaveTransaction = (saved: Partial<TransactionItem>) => {
-    if (saved.id) {
-      // update
-      setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved } as TransactionItem : t));
-      toast.success("Transacción actualizada exitosamente");
-    } else {
-      // create
-      const newTx: TransactionItem = {
-        id: String(Date.now()),
-        description: saved.description!,
-        type: saved.type!,
-        amount: saved.amount!,
-        currency: "USD",
-        date: saved.date || new Date(),
-        status: saved.status || "cleared",
-        category: saved.category || null,
-        account: saved.account || { name: "Cuenta Corriente" },
-        toAccount: saved.toAccount || null,
-        member: saved.member || { displayName: "Ana M." },
-        isRecurring: saved.isRecurring,
-        recurringFrequency: saved.recurringFrequency,
-        attachmentUrl: saved.attachmentUrl,
-        notes: saved.notes,
-      };
-      setTransactionsList(prev => [newTx, ...prev]);
-      toast.success("Transacción registrada exitosamente");
+  const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
+    try {
+      if (saved.id) {
+        await updateTransaction(saved.id, {
+          description: saved.description,
+          amount: saved.amount !== undefined ? parseFloat(saved.amount) : undefined,
+          type: saved.type,
+          status: saved.status,
+          categoryId: saved.category?.id || undefined,
+          accountId: saved.account?.id || undefined,
+          date: saved.date ? saved.date.toISOString() : undefined,
+        });
+        setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved } as TransactionItem : t));
+        toast.success("Transacción actualizada exitosamente");
+      } else {
+        const res = await createTransaction({
+          description: saved.description!,
+          amount: parseFloat(saved.amount || "0"),
+          type: saved.type!,
+          accountId: saved.account?.id || (accountsList[0]?.id ?? ""),
+          toAccountId: saved.toAccount?.id || undefined,
+          categoryId: saved.category?.id || undefined,
+          date: saved.date ? saved.date.toISOString() : new Date().toISOString(),
+          status: saved.status || "cleared",
+          isRecurring: Boolean(saved.isRecurring),
+        });
+        const created = res.transaction;
+        const newTx: TransactionItem = {
+          id: created.id,
+          description: created.description,
+          type: created.type as any,
+          amount: String(created.amount),
+          currency: "USD",
+          date: new Date(created.date),
+          status: created.status as any,
+          category: saved.category || null,
+          account: saved.account || { name: "Principal" },
+          toAccount: saved.toAccount || null,
+          member: saved.member || null,
+          isRecurring: created.isRecurring,
+          notes: saved.notes || undefined,
+        };
+        setTransactionsList(prev => [newTx, ...prev]);
+        toast.success("Transacción registrada en la base de datos");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al registrar la transacción");
     }
     setEditingItem(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm("¿Seguro que deseas eliminar esta transacción?")) {
-      setTransactionsList(prev => prev.filter(t => t.id !== id));
-      toast.info("Transacción eliminada");
+      try {
+        await deleteTransaction(id);
+        setTransactionsList(prev => prev.filter(t => t.id !== id));
+        toast.info("Transacción eliminada");
+      } catch (err: any) {
+        toast.error(err?.message || "Error al eliminar");
+      }
     }
   };
 
@@ -463,6 +543,9 @@ export function TransactionsClient() {
           onClose={() => { setShowModal(false); setEditingItem(null); }}
           onSave={handleSaveTransaction}
           initialData={editingItem}
+          categoriesList={categoriesList}
+          accountsList={accountsList}
+          membersList={membersList}
         />
       )}
 

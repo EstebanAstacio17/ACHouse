@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, Building2, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2,
   X, Check, ExternalLink, ArrowUpCircle, ArrowDownCircle, Percent
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
+import { getBusinesses, createBusiness, updateBusiness } from "@/lib/actions/businesses-projects-loans";
 
 export interface BusinessItem {
   id: string;
@@ -130,6 +131,33 @@ export function BusinessesClient() {
   const [showModal, setShowModal] = useState(false);
   const [editingBiz, setEditingBiz] = useState<BusinessItem | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    getBusinesses()
+      .then((data) => {
+        if (active && data) {
+          setBusinesses(
+            data.map((b: any) => ({
+              id: b.id,
+              name: b.name,
+              description: b.description || "",
+              type: b.type || "Comercio",
+              currency: b.currency || "USD",
+              income: 0,
+              expenses: 0,
+              transactions: (b.transactions || []).length,
+              isActive: b.isActive ?? true,
+              monthlyData: [],
+            }))
+          );
+        }
+      })
+      .catch((err) => console.error("Error loading businesses:", err));
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   const totalRevenue = businesses.reduce((sum, b) => sum + b.income, 0);
@@ -137,25 +165,42 @@ export function BusinessesClient() {
   const totalProfit = totalRevenue - totalExpenses;
   const overallMargin = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : "0.0";
 
-  const handleSave = (saved: Partial<BusinessItem>) => {
-    if (saved.id) {
-      setBusinesses(prev => prev.map(b => b.id === saved.id ? { ...b, ...saved } as BusinessItem : b));
-      toast.success("Negocio actualizado exitosamente");
-    } else {
-      const newBiz: BusinessItem = {
-        id: String(Date.now()),
-        name: saved.name!,
-        description: saved.description || "",
-        type: saved.type || "Comercio",
-        currency: saved.currency || "USD",
-        income: 0,
-        expenses: 0,
-        transactions: 0,
-        isActive: true,
-        monthlyData: [],
-      };
-      setBusinesses(prev => [newBiz, ...prev]);
-      toast.success("Negocio creado exitosamente");
+  const handleSave = async (saved: Partial<BusinessItem>) => {
+    try {
+      if (saved.id) {
+        await updateBusiness(saved.id, {
+          name: saved.name,
+          description: saved.description,
+          type: saved.type,
+          currency: saved.currency,
+        });
+        setBusinesses(prev => prev.map(b => b.id === saved.id ? { ...b, ...saved } as BusinessItem : b));
+        toast.success("Negocio actualizado exitosamente");
+      } else {
+        const res = await createBusiness({
+          name: saved.name!,
+          description: saved.description,
+          type: saved.type,
+          currency: saved.currency,
+        });
+        const created = res.business;
+        const newBiz: BusinessItem = {
+          id: created.id,
+          name: created.name,
+          description: created.description || "",
+          type: created.type || "Comercio",
+          currency: created.currency || "USD",
+          income: 0,
+          expenses: 0,
+          transactions: 0,
+          isActive: true,
+          monthlyData: [],
+        };
+        setBusinesses(prev => [newBiz, ...prev]);
+        toast.success("Negocio registrado exitosamente");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al guardar negocio");
     }
     setEditingBiz(null);
   };

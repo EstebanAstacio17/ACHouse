@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Home, Globe, Clock, ChevronRight, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 
@@ -34,6 +34,18 @@ export default function OnboardingPage() {
     timezone: "America/Tegucigalpa",
   });
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    // If user already has an active household, redirect to dashboard
+    fetch("/api/households")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.households && data.households.length > 0) {
+          router.replace("/dashboard");
+        }
+      })
+      .catch(() => {});
+  }, [router]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

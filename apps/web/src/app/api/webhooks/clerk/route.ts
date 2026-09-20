@@ -9,9 +9,10 @@ export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
   if (!WEBHOOK_SECRET) {
+    console.warn("[Clerk Webhook] CLERK_WEBHOOK_SECRET not configured, skipped verification.");
     return NextResponse.json(
-      { error: "Missing CLERK_WEBHOOK_SECRET" },
-      { status: 500 }
+      { received: true, warning: "Missing CLERK_WEBHOOK_SECRET" },
+      { status: 200 }
     );
   }
 

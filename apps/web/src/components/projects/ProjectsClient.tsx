@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, FolderKanban, Calendar, DollarSign, CheckCircle2, Pause,
   X, Check, User, Building2, Clock, AlertTriangle, CheckCheck,
@@ -9,6 +9,8 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
+import { getProjects, createProject, updateProject, deleteProject, getBusinesses } from "@/lib/actions/businesses-projects-loans";
+import { getMembers } from "@/lib/actions/entities";
 
 const STATUS_CONFIG = {
   active: { label: "Activo", color: "var(--color-income)", bg: "var(--color-income-dim)" },
@@ -38,10 +40,14 @@ function ProjectModal({
   onClose,
   onSave,
   initialData,
+  members = [],
+  businesses = [],
 }: {
   onClose: () => void;
   onSave: (proj: Partial<ProjectItem>) => void;
   initialData?: ProjectItem | null;
+  members?: Array<{ id: string; name: string }>;
+  businesses?: Array<{ id: string; name: string }>;
 }) {
   const [form, setForm] = useState({
     name: initialData?.name ?? "",
@@ -145,16 +151,18 @@ function ProjectModal({
                 <label className="label"><User size={12} style={{ display: "inline" }} />Integrante Responsable</label>
                 <select className="input" value={form.member} onChange={e => set("member", e.target.value)}>
                   <option value="">Sin asignar / Hogar</option>
-                  <option value="Ana M.">Ana M.</option>
-                  <option value="Carlos R.">Carlos R.</option>
+                  {members.map(m => (
+                    <option key={m.id} value={m.name}>{m.name}</option>
+                  ))}
                 </select>
               </div>
               <div className="form-group">
                 <label className="label"><Building2 size={12} style={{ display: "inline" }} />Negocio Vinculado</label>
                 <select className="input" value={form.business} onChange={e => set("business", e.target.value)}>
                   <option value="">Ninguno / Gastos del Hogar</option>
-                  <option value="Artesanías Ana">Artesanías Ana</option>
-                  <option value="Diseño Web CR">Diseño Web CR</option>
+                  {businesses.map(b => (
+                    <option key={b.id} value={b.name}>{b.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -236,10 +244,51 @@ function CloseProjectModal({
 export function ProjectsClient() {
   const toast = useToast();
   const [projects, setProjects] = useState<ProjectItem[]>(INITIAL_PROJECTS);
+  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
+  const [businesses, setBusinesses] = useState<Array<{ id: string; name: string }>>([]);
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingProj, setEditingProj] = useState<ProjectItem | null>(null);
   const [closingProj, setClosingProj] = useState<ProjectItem | null>(null);
   const [filterStatus, setFilterStatus] = useState("all");
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [dbProjects, dbMembers, dbBusinesses] = await Promise.all([
+        getProjects(),
+        getMembers(),
+        getBusinesses(),
+      ]);
+
+      setProjects(
+        dbProjects.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description ?? "",
+          budget: parseFloat(p.budget ?? "0"),
+          spent: 0,
+          currency: p.currency ?? "USD",
+          status: p.status as any,
+          startDate: new Date(p.startDate),
+          endDate: p.endDate ? new Date(p.endDate) : null,
+          member: p.member?.displayName ?? null,
+          business: p.business?.name ?? null,
+        }))
+      );
+
+      setMembers(dbMembers.map((m: any) => ({ id: m.id, name: m.displayName })));
+      setBusinesses(dbBusinesses.map((b: any) => ({ id: b.id, name: b.name })));
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
@@ -248,39 +297,59 @@ export function ProjectsClient() {
 
   const filtered = projects.filter(p => filterStatus === "all" || p.status === filterStatus);
 
-  const handleSave = (saved: Partial<ProjectItem>) => {
-    if (saved.id) {
-      setProjects(prev => prev.map(p => p.id === saved.id ? { ...p, ...saved } as ProjectItem : p));
-      toast.success("Proyecto actualizado exitosamente");
-    } else {
-      const newProj: ProjectItem = {
-        id: String(Date.now()),
-        name: saved.name!,
-        description: saved.description || "",
-        budget: saved.budget || 0,
-        spent: 0,
-        currency: saved.currency || "USD",
-        status: saved.status || "active",
-        startDate: saved.startDate || new Date(),
-        endDate: saved.endDate || null,
-        member: saved.member || null,
-        business: saved.business || null,
-      };
-      setProjects(prev => [newProj, ...prev]);
-      toast.success("Proyecto creado exitosamente");
+  const handleSave = async (saved: Partial<ProjectItem>) => {
+    try {
+      if (saved.id) {
+        await updateProject(saved.id, {
+          name: saved.name,
+          description: saved.description,
+          budget: saved.budget,
+          status: saved.status,
+          endDate: saved.endDate ? saved.endDate.toISOString().split("T")[0] : undefined,
+        });
+        toast.success("Proyecto actualizado exitosamente");
+      } else {
+        const foundMember = members.find(m => m.name === saved.member);
+        const foundBiz = businesses.find(b => b.name === saved.business);
+
+        await createProject({
+          name: saved.name!,
+          description: saved.description,
+          budget: saved.budget,
+          currency: saved.currency,
+          startDate: saved.startDate ? saved.startDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+          endDate: saved.endDate ? saved.endDate.toISOString().split("T")[0] : undefined,
+          memberId: foundMember?.id,
+          businessId: foundBiz?.id,
+        });
+        toast.success("Proyecto creado exitosamente");
+      }
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Error al guardar proyecto");
     }
     setEditingProj(null);
   };
 
-  const handleConfirmClose = (id: string) => {
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, status: "completed" } : p));
-    toast.success("Proyecto cerrado y registrado como completado");
+  const handleConfirmClose = async (id: string) => {
+    try {
+      await updateProject(id, { status: "completed" });
+      toast.success("Proyecto cerrado y registrado como completado");
+      await loadData();
+    } catch (err: any) {
+      toast.error("Error al cerrar el proyecto");
+    }
   };
 
-  const handleDelete = (id: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar el proyecto "${name}"?`)) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      toast.info(`Proyecto "${name}" eliminado`);
+      try {
+        await deleteProject(id);
+        toast.info(`Proyecto "${name}" eliminado`);
+        await loadData();
+      } catch (err: any) {
+        toast.error("Error al eliminar el proyecto");
+      }
     }
   };
 
@@ -291,6 +360,8 @@ export function ProjectsClient() {
           onClose={() => { setShowModal(false); setEditingProj(null); }}
           onSave={handleSave}
           initialData={editingProj}
+          members={members}
+          businesses={businesses}
         />
       )}
 
