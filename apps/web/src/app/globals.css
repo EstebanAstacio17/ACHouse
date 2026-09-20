@@ -36,6 +36,7 @@ html.dark,
   --bg-base:        #111111; /* Fondo Principal */
   --bg-card:        #1E1E1E; /* Superficie / Tarjetas */
   --bg-elevated:    #1E1E1E;
+  --bg-surface:     #1E1E1E;
   --bg-card-alt:    #242424;
   --bg-hover:       rgba(255, 255, 255, 0.05);
   --bg-active:      rgba(255, 255, 255, 0.08);
@@ -149,6 +150,7 @@ html.light,
   --bg-base:        #F8F9FA; /* Fondo Principal muy suave y limpio */
   --bg-card:        #FFFFFF; /* Superficie / Tarjetas limpias y nítidas */
   --bg-elevated:    #FFFFFF;
+  --bg-surface:     #FFFFFF;
   --bg-card-alt:    #F1F3F4;
   --bg-hover:       rgba(0, 0, 0, 0.04);
   --bg-active:      rgba(0, 0, 0, 0.07);

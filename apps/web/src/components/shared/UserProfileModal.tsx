@@ -85,38 +85,56 @@ export function UserProfileModal({
 
   return (
     <div
-      className="overlay"
       style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.72)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        zIndex: 99999,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "1rem",
-        zIndex: 9999,
+        padding: "1.25rem",
+        overflowY: "auto",
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className="modal"
         style={{
           width: "min(520px, 95vw)",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          background: "var(--bg-surface)",
+          maxHeight: "min(90vh, 760px)",
+          backgroundColor: "var(--bg-card)",
           border: "1px solid var(--border-default)",
           borderRadius: "var(--radius-2xl)",
-          boxShadow: "var(--shadow-2xl)",
+          boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          margin: "auto",
+          position: "relative",
           animation: "modalSpring 0.3s var(--ease-spring)",
         }}
       >
         {/* Header */}
-        <div className="modal-header" style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--border-subtle)" }}>
+        <div
+          style={{
+            padding: "1.25rem 1.5rem",
+            borderBottom: "1px solid var(--border-subtle)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: "var(--bg-card)",
+            flexShrink: 0,
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
             <div
               style={{
-                width: 32,
-                height: 32,
+                width: 34,
+                height: 34,
                 borderRadius: "var(--radius-md)",
                 background: "var(--accent-subtle)",
                 display: "flex",
@@ -136,13 +154,46 @@ export function UserProfileModal({
               </p>
             </div>
           </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Cerrar">
-            <X size={18} />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar modal de perfil"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-tertiary)",
+              cursor: "pointer",
+              padding: "0.35rem",
+              borderRadius: "var(--radius-sm)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "background 0.15s, color 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--bg-hover)";
+              e.currentTarget.style.color = "var(--text-primary)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--text-tertiary)";
+            }}
+          >
+            <X size={20} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="modal-body" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+        <div
+          style={{
+            padding: "1.5rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.25rem",
+            overflowY: "auto",
+            backgroundColor: "var(--bg-card)",
+          }}
+        >
           {/* User Hero Banner */}
           <div
             style={{
@@ -150,7 +201,7 @@ export function UserProfileModal({
               alignItems: "center",
               gap: "1.125rem",
               padding: "1.125rem",
-              background: "linear-gradient(135deg, rgba(66, 133, 244, 0.08) 0%, rgba(99, 102, 241, 0.04) 100%)",
+              backgroundColor: "var(--bg-card-alt)",
               border: "1px solid var(--border-subtle)",
               borderRadius: "var(--radius-xl)",
             }}
@@ -160,19 +211,20 @@ export function UserProfileModal({
                 src={user.imageUrl}
                 alt={displayName}
                 style={{
-                  width: 60,
-                  height: 60,
+                  width: 58,
+                  height: 58,
                   borderRadius: "50%",
                   objectFit: "cover",
                   boxShadow: "var(--shadow-md)",
                   border: "2px solid var(--accent)",
+                  flexShrink: 0,
                 }}
               />
             ) : (
               <div
                 style={{
-                  width: 60,
-                  height: 60,
+                  width: 58,
+                  height: 58,
                   borderRadius: "50%",
                   background: "linear-gradient(135deg, var(--accent) 0%, #3b82f6 100%)",
                   display: "flex",
@@ -191,7 +243,7 @@ export function UserProfileModal({
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                <h3 style={{ fontSize: "1.125rem", fontWeight: 800, margin: 0, color: "var(--text-primary)" }}>
+                <h3 style={{ fontSize: "1.0625rem", fontWeight: 800, margin: 0, color: "var(--text-primary)" }}>
                   {displayName}
                 </h3>
                 <span
@@ -239,9 +291,9 @@ export function UserProfileModal({
             <div
               style={{
                 padding: "0.875rem",
-                background: "var(--bg-active)",
+                backgroundColor: "var(--bg-card-alt)",
                 borderRadius: "var(--radius-lg)",
-                border: "1px solid var(--border-hair)",
+                border: "1px solid var(--border-default)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--text-tertiary)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
@@ -255,9 +307,9 @@ export function UserProfileModal({
             <div
               style={{
                 padding: "0.875rem",
-                background: "var(--bg-active)",
+                backgroundColor: "var(--bg-card-alt)",
                 borderRadius: "var(--radius-lg)",
-                border: "1px solid var(--border-hair)",
+                border: "1px solid var(--border-default)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--text-tertiary)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
@@ -271,9 +323,9 @@ export function UserProfileModal({
             <div
               style={{
                 padding: "0.875rem",
-                background: "var(--bg-active)",
+                backgroundColor: "var(--bg-card-alt)",
                 borderRadius: "var(--radius-lg)",
-                border: "1px solid var(--border-hair)",
+                border: "1px solid var(--border-default)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--text-tertiary)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
@@ -287,9 +339,9 @@ export function UserProfileModal({
             <div
               style={{
                 padding: "0.875rem",
-                background: "var(--bg-active)",
+                backgroundColor: "var(--bg-card-alt)",
                 borderRadius: "var(--radius-lg)",
-                border: "1px solid var(--border-hair)",
+                border: "1px solid var(--border-default)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--text-tertiary)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
@@ -304,18 +356,34 @@ export function UserProfileModal({
           {/* Clerk Profile Action if available */}
           {onOpenClerkProfile && (
             <button
+              type="button"
               onClick={() => {
                 onClose();
                 onOpenClerkProfile();
               }}
-              className="btn btn-secondary"
               style={{
                 width: "100%",
+                display: "flex",
+                alignItems: "center",
                 justifyContent: "center",
                 gap: "0.5rem",
-                padding: "0.75rem",
+                padding: "0.8rem",
                 fontSize: "0.8125rem",
                 fontWeight: 600,
+                backgroundColor: "var(--bg-card-alt)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-lg)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--bg-hover)";
+                e.currentTarget.style.borderColor = "var(--accent)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--bg-card-alt)";
+                e.currentTarget.style.borderColor = "var(--border-default)";
               }}
             >
               <KeyRound size={15} color="var(--accent)" />
@@ -327,32 +395,56 @@ export function UserProfileModal({
 
         {/* Footer */}
         <div
-          className="modal-footer"
           style={{
             padding: "1rem 1.5rem",
             borderTop: "1px solid var(--border-subtle)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            background: "var(--bg-active)",
+            backgroundColor: "var(--bg-card)",
+            flexShrink: 0,
           }}
         >
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "0.5rem 1rem",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-default)",
+              backgroundColor: "var(--bg-card-alt)",
+              color: "var(--text-primary)",
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-card-alt)")}
+          >
             Cerrar
           </button>
 
           <button
             type="button"
             onClick={handleSignOutClick}
-            className="btn btn-danger btn-sm"
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "0.5rem",
-              background: "var(--color-expense)",
+              padding: "0.5rem 1.125rem",
+              borderRadius: "var(--radius-md)",
+              border: "none",
+              backgroundColor: "var(--color-expense)",
               color: "white",
+              fontSize: "0.8125rem",
               fontWeight: 600,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(239, 68, 68, 0.35)",
+              transition: "opacity 0.15s ease",
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
             <LogOut size={15} />
             Cerrar Sesión
