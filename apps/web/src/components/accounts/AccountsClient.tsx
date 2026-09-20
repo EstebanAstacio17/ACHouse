@@ -26,7 +26,7 @@ const ACCOUNT_TYPES = {
   cash: { label: "Efectivo", icon: Banknote, color: "var(--color-investment)", bg: "var(--color-investment-dim)" },
 };
 
-const DEMO_ACCOUNTS: AccountItem[] = [];
+const INITIAL_ACCOUNTS: AccountItem[] = [];
 
 function AccountModal({
   onClose,
@@ -220,7 +220,7 @@ function AccountModal({
 
 export function AccountsClient() {
   const toast = useToast();
-  const [accounts, setAccounts] = useState<AccountItem[]>(DEMO_ACCOUNTS);
+  const [accounts, setAccounts] = useState<AccountItem[]>(INITIAL_ACCOUNTS);
   const [showModal, setShowModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
 

@@ -9,7 +9,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
 
-const DEMO_AUDIT_LOGS: Array<{ id: string; action: string; entity: string; user: string; date: Date }> = [];
+const INITIAL_AUDIT_LOGS: Array<{ id: string; action: string; entity: string; user: string; date: Date }> = [];
 
 export function SettingsClient() {
   const toast = useToast();
@@ -273,14 +273,14 @@ export function SettingsClient() {
                 </tr>
               </thead>
               <tbody>
-                {DEMO_AUDIT_LOGS.length === 0 ? (
+                {INITIAL_AUDIT_LOGS.length === 0 ? (
                   <tr>
                     <td colSpan={4} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--text-secondary)" }}>
                       No hay registros de auditoría aún. Las acciones y cambios se registrarán aquí automáticamente.
                     </td>
                   </tr>
                 ) : (
-                  DEMO_AUDIT_LOGS.map(log => (
+                  INITIAL_AUDIT_LOGS.map(log => (
                     <tr key={log.id}>
                       <td>
                         <span className="badge badge-reconciled">

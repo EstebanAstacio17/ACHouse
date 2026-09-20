@@ -62,7 +62,7 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('achouse-theme');if(t==='light'){document.documentElement.classList.add('light');}else if(t==='dark'){document.documentElement.classList.remove('light');}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('achouse-theme');if(t==='light'){document.documentElement.classList.add('light');document.documentElement.setAttribute('data-theme','light');}else if(t==='dark'){document.documentElement.classList.remove('light');document.documentElement.setAttribute('data-theme','dark');}else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches){document.documentElement.classList.add('light');document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();`,
           }}
         />
       </head>
@@ -83,9 +83,6 @@ export default function RootLayout({
       appearance={{
         variables: {
           colorPrimary: "#4285F4",
-          colorBackground: "#1E1E1E",
-          colorInputBackground: "#111111",
-          colorText: "#F8F9FA",
           borderRadius: "10px",
           fontFamily: "Plus Jakarta Sans, Inter, sans-serif",
         },

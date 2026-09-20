@@ -68,35 +68,14 @@ export default function SignUpPage() {
           </p>
         </div>
 
-        <div
-          style={{
-            background: "rgba(99,102,241,0.08)",
-            border: "1px solid rgba(99,102,241,0.25)",
-            padding: "0.875rem",
-            borderRadius: "var(--radius-md)",
-            fontSize: "0.8125rem",
-            color: "#a5b4fc",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.375rem",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-            <KeyRound size={15} /> Modo Demostración Local Activo
-          </div>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
-            Las credenciales de Clerk aún están en modo plantilla en <code>.env.local</code>. Puedes crear tu hogar inicial ingresando directamente al onboarding.
-          </p>
-        </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div className="form-group">
             <label className="label">Nombre completo</label>
-            <input className="input" defaultValue="Usuario Principal" />
+            <input className="input" placeholder="Tu nombre" />
           </div>
           <div className="form-group">
             <label className="label">Correo electrónico</label>
-            <input className="input" type="email" defaultValue="admin@achouse.app" />
+            <input className="input" type="email" placeholder="tu@email.com" />
           </div>
 
           <Link
@@ -104,7 +83,7 @@ export default function SignUpPage() {
             className="btn btn-primary btn-lg"
             style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem" }}
           >
-            Comenzar Onboarding <ArrowRight size={16} />
+            Comenzar Configuración <ArrowRight size={16} />
           </Link>
         </div>
 

@@ -68,35 +68,14 @@ export default function SignInPage() {
           </p>
         </div>
 
-        <div
-          style={{
-            background: "rgba(99,102,241,0.08)",
-            border: "1px solid rgba(99,102,241,0.25)",
-            padding: "0.875rem",
-            borderRadius: "var(--radius-md)",
-            fontSize: "0.8125rem",
-            color: "#a5b4fc",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.375rem",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-            <KeyRound size={15} /> Modo Demostración Local Activo
-          </div>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
-            Las claves de Clerk aún no han sido configuradas en <code>.env.local</code>. Puedes entrar directamente para probar todas las funciones.
-          </p>
-        </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div className="form-group">
             <label className="label">Correo electrónico</label>
-            <input className="input" type="email" defaultValue="demo@achouse.app" readOnly />
+            <input className="input" type="email" placeholder="tu@email.com" />
           </div>
           <div className="form-group">
             <label className="label">Contraseña</label>
-            <input className="input" type="password" defaultValue="••••••••••••" readOnly />
+            <input className="input" type="password" placeholder="Tu contraseña" />
           </div>
 
           <Link
@@ -104,7 +83,7 @@ export default function SignInPage() {
             className="btn btn-primary btn-lg"
             style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem" }}
           >
-            Entrar al Dashboard <ArrowRight size={16} />
+            Acceder al Dashboard <ArrowRight size={16} />
           </Link>
         </div>
 

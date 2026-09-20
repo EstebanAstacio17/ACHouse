@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import {
-  Bell, Search, ChevronDown, Home, Moon, Sun,
+  Bell, Search, ChevronDown, Home,
   CreditCard, Calendar, CheckCircle2, X, Menu,
   Wallet, Users, FolderKanban, Tag, BarChart3,
   Settings, ArrowLeftRight, Building2, Landmark,
@@ -17,7 +18,7 @@ interface HeaderProps {
   onToggleMobileMenu?: () => void;
 }
 
-const DEMO_NOTIFICATIONS: Array<{ id: string; title: string; message: string; time: string; type: "warning" | "info" | "success"; read: boolean }> = [];
+const INITIAL_NOTIFICATIONS: Array<{ id: string; title: string; message: string; time: string; type: "warning" | "info" | "success"; read: boolean }> = [];
 
 const SEARCH_ITEMS = [
   { label: "Dashboard General",                href: "/dashboard",              category: "Navegación",    icon: Home },
@@ -44,8 +45,7 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
   const [showSearch,       setShowSearch]       = useState(false);
   const [searchQuery,      setSearchQuery]      = useState("");
   const [showNotif,        setShowNotif]        = useState(false);
-  const [notifications,    setNotifications]    = useState(DEMO_NOTIFICATIONS);
-  const [theme,            setTheme]            = useState<"dark" | "light">("dark");
+  const [notifications,    setNotifications]    = useState(INITIAL_NOTIFICATIONS);
   const searchRef = useRef<HTMLInputElement>(null);
   const notifRef  = useRef<HTMLDivElement>(null);
 
@@ -91,24 +91,7 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
     return () => document.removeEventListener("mousedown", handler);
   }, [showHouseholdMenu]);
 
-  /* ── Theme sync & persistence ── */
-  useEffect(() => {
-    const applyTheme = () => {
-      const saved = localStorage.getItem("achouse-theme") as "dark" | "light" | null;
-      if (saved) {
-        setTheme(saved);
-        document.documentElement.classList.toggle("light", saved === "light");
-      } else if (document.documentElement.classList.contains("light")) {
-        setTheme("light");
-      } else {
-        setTheme("dark");
-      }
-    };
 
-    applyTheme();
-    window.addEventListener("achouse-theme-change", applyTheme);
-    return () => window.removeEventListener("achouse-theme-change", applyTheme);
-  }, []);
 
   /* ── ⌘K shortcut ── */
   useEffect(() => {
@@ -144,16 +127,7 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
     return () => document.removeEventListener("mousedown", handler);
   }, [showNotif]);
 
-  /* ── Theme toggle ── */
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("achouse-theme", next);
-      document.documentElement.classList.toggle("light", next === "light");
-      window.dispatchEvent(new Event("achouse-theme-change"));
-    }
-  };
+
 
   /* ── Search filter ── */
   const filteredItems = searchQuery.trim()
@@ -474,17 +448,7 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
         </div>
 
         {/* Theme toggle */}
-        <button
-          className="btn btn-ghost btn-icon"
-          id="theme-toggle-btn"
-          onClick={toggleTheme}
-          aria-label={theme === "dark" ? "Modo claro" : "Modo oscuro"}
-        >
-          {theme === "dark"
-            ? <Sun  size={16} strokeWidth={1.75} />
-            : <Moon size={16} strokeWidth={1.75} />
-          }
-        </button>
+        <ThemeToggle />
 
         {/* User Avatar */}
         <UserAvatar />

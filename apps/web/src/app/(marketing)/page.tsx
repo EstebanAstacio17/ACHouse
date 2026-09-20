@@ -5,6 +5,7 @@ import {
   CreditCard, Users, Building2, FolderKanban,
   BarChart3, CheckCircle2, ChevronRight, Zap
 } from "lucide-react";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
 
 export const metadata: Metadata = {
   title: "ACHouse — Plataforma Inteligente de Finanzas Familiares",
@@ -76,7 +77,7 @@ export default function LandingPage() {
           zIndex: 50,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.75rem", textDecoration: "none" }}>
           <div
             style={{
               width: 38,
@@ -93,27 +94,23 @@ export default function LandingPage() {
             🏠
           </div>
           <span
+            className="brand-title-gradient"
             style={{
               fontWeight: 800,
               fontSize: "1.25rem",
               letterSpacing: "-0.03em",
-              background: "linear-gradient(135deg, #ffffff 0%, #c7d2fe 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
             }}
           >
             ACHouse
           </span>
-        </div>
+        </Link>
 
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <Link href="/dashboard" className="btn btn-secondary btn-sm" style={{ fontWeight: 600 }}>
-            Ver Demo Local
-          </Link>
-          <Link href="/sign-in" className="btn btn-ghost btn-sm">
+          <ThemeToggle />
+          <Link href="/sign-in" className="btn btn-ghost btn-sm" style={{ fontWeight: 600 }}>
             Iniciar sesión
           </Link>
-          <Link href="/sign-up" className="btn btn-primary btn-sm">
+          <Link href="/sign-up" className="btn btn-primary btn-sm" style={{ fontWeight: 600 }}>
             Comenzar gratis
           </Link>
         </div>
@@ -163,15 +160,13 @@ export default function LandingPage() {
           </div>
 
           <h1
+            className="hero-title-gradient"
             style={{
               fontSize: "clamp(2.5rem, 5.5vw, 4.25rem)",
               fontWeight: 900,
               lineHeight: 1.08,
               letterSpacing: "-0.04em",
               marginBottom: "1.5rem",
-              background: "linear-gradient(145deg, #ffffff 30%, #a5b4fc 70%, #6366f1 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
             }}
           >
             Las finanzas de tu hogar,<br />
@@ -193,11 +188,11 @@ export default function LandingPage() {
           </p>
 
           <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/dashboard" className="btn btn-primary btn-lg" style={{ fontSize: "1rem", padding: "0.875rem 1.75rem" }}>
-              Explorar Dashboard <ArrowRight size={18} />
+            <Link href="/sign-up" className="btn btn-primary btn-lg" style={{ fontSize: "1rem", padding: "0.875rem 1.75rem" }}>
+              Comenzar Gratis <ArrowRight size={18} />
             </Link>
-            <Link href="/sign-up" className="btn btn-secondary btn-lg" style={{ fontSize: "1rem", padding: "0.875rem 1.75rem" }}>
-              Crear Cuenta Gratis
+            <Link href="/sign-in" className="btn btn-secondary btn-lg" style={{ fontSize: "1rem", padding: "0.875rem 1.75rem" }}>
+              Iniciar Sesión
             </Link>
           </div>
         </div>
@@ -209,8 +204,8 @@ export default function LandingPage() {
             style={{
               padding: "1.5rem",
               borderRadius: "var(--radius-3xl)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              boxShadow: "0 24px 64px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.06)",
+              border: "1px solid var(--border-subtle)",
+              boxShadow: "var(--shadow-xl)",
               textAlign: "left",
             }}
           >
@@ -220,7 +215,7 @@ export default function LandingPage() {
               <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
               <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e" }} />
               <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginLeft: "0.5rem", fontWeight: 600 }}>
-                ACHouse — Dashboard Familiar
+                ACHouse — Panel Familiar Inteligente
               </span>
             </div>
 
@@ -304,10 +299,10 @@ export default function LandingPage() {
           Comienza a gestionar tu hogar hoy
         </h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: "2rem", fontSize: "1.0625rem" }}>
-          Funciona de manera inmediata en tu entorno local.
+          Control inteligente, reportes automáticos y colaboración en tiempo real para tu familia.
         </p>
-        <Link href="/dashboard" className="btn btn-primary btn-lg" style={{ padding: "0.875rem 2rem", fontSize: "1rem" }}>
-          Entrar a la Plataforma <ChevronRight size={18} />
+        <Link href="/sign-up" className="btn btn-primary btn-lg" style={{ padding: "0.875rem 2rem", fontSize: "1rem" }}>
+          Crear Cuenta Gratuita <ChevronRight size={18} />
         </Link>
       </section>
 
@@ -321,7 +316,7 @@ export default function LandingPage() {
           borderTop: "1px solid var(--border-hair)",
         }}
       >
-        © {new Date().getFullYear()} ACHouse. Plataforma de Finanzas Familiares.
+        © {new Date().getFullYear()} ACHouse. Plataforma de Finanzas Familiares. Todos los derechos reservados.
       </footer>
     </div>
   );
