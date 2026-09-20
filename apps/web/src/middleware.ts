@@ -4,9 +4,9 @@ import type { NextRequest } from "next/server";
 
 const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 const hasValidClerkKey =
-  pubKey.startsWith("pk_test_") || pubKey.startsWith("pk_live_")
-    ? !pubKey.includes("REEMPLAZAR") && pubKey.length > 20 && pubKey.includes("$")
-    : false;
+  (pubKey.startsWith("pk_test_") || pubKey.startsWith("pk_live_")) &&
+  !pubKey.includes("REEMPLAZAR") &&
+  pubKey.length > 20;
 
 const isPublicRoute = createRouteMatcher([
   "/",

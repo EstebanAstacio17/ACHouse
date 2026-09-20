@@ -15,7 +15,11 @@ import {
   Settings,
   ChevronRight,
   Home,
+  LogOut,
+  User,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ui/ToastContext";
 
 const navSections = [
   {
@@ -51,6 +55,18 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const toast = useToast();
+
+  const handleSignOut = () => {
+    toast.info("Cerrando sesión de ACHouse...");
+    document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+    if (onClose) onClose();
+    setTimeout(() => {
+      router.push("/sign-in");
+      router.refresh();
+    }, 350);
+  };
 
   return (
     <>
@@ -129,12 +145,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        {/* ── Bottom settings ──────────────────────────────────────── */}
+        {/* ── Bottom settings & Sign Out ────────────────────────────── */}
         <div
           style={{
             padding: "0.75rem 0.625rem",
             borderTop: "1px solid var(--border-hair)",
             flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.25rem",
           }}
         >
           <Link
@@ -145,6 +164,23 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <Settings size={16} strokeWidth={pathname.startsWith("/dashboard/settings") ? 2.25 : 1.75} />
             <span style={{ flex: 1, letterSpacing: "-0.01em" }}>Configuración</span>
           </Link>
+
+          <button
+            onClick={handleSignOut}
+            className="nav-item"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              textAlign: "left",
+              width: "100%",
+              color: "var(--color-expense)",
+            }}
+            title="Cerrar Sesión"
+          >
+            <LogOut size={16} strokeWidth={2} />
+            <span style={{ flex: 1, letterSpacing: "-0.01em", fontWeight: 600 }}>Cerrar Sesión</span>
+          </button>
         </div>
       </aside>
     </>

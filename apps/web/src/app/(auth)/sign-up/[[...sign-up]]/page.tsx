@@ -6,8 +6,7 @@ const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 const hasValidClerkKey =
   (pubKey.startsWith("pk_test_") || pubKey.startsWith("pk_live_")) &&
   !pubKey.includes("REEMPLAZAR") &&
-  pubKey.length > 20 &&
-  pubKey.includes("$");
+  pubKey.length > 20;
 
 export default function SignUpPage() {
   if (hasValidClerkKey) {
