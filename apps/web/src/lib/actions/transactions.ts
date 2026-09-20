@@ -11,6 +11,7 @@ import {
 import { eq, and, desc, gte, lte, ilike, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { transactionSchema } from "@achouse/types";
 import { getActiveHouseholdId } from "@/lib/household";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -27,24 +28,7 @@ async function getAuthenticatedMember() {
   return { userId, householdId, member };
 }
 
-// ── Transaction Schema ───────────────────────────────────────────────────────
-
-const transactionSchema = z.object({
-  accountId: z.string().min(1),
-  categoryId: z.string().optional(),
-  memberId: z.string().optional(),
-  businessId: z.string().optional(),
-  projectId: z.string().optional(),
-  type: z.enum(["income", "expense", "transfer"]),
-  amount: z.coerce.number().positive(),
-  currency: z.string().length(3).default("USD"),
-  description: z.string().min(1).max(255),
-  date: z.string(),
-  referenceNo: z.string().optional(),
-  status: z.enum(["pending", "cleared", "reconciled"]).default("cleared"),
-  isRecurring: z.boolean().default(false),
-  toAccountId: z.string().optional(),
-});
+// ── Transaction Schema imported from @achouse/types ──────────────────────────
 
 // ── CRUD Operations ──────────────────────────────────────────────────────────
 
@@ -110,44 +94,51 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
   const { householdId, userId, member } = await getAuthenticatedMember();
   const parsed = transactionSchema.parse(data);
 
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      householdId,
-      accountId: parsed.accountId,
-      categoryId: parsed.categoryId ?? null,
-      memberId: parsed.memberId ?? member.id,
-      businessId: parsed.businessId ?? null,
-      projectId: parsed.projectId ?? null,
-      type: parsed.type,
-      amount: parsed.amount.toString(),
-      currency: parsed.currency,
-      description: parsed.description,
-      date: new Date(parsed.date),
-      referenceNo: parsed.referenceNo ?? null,
-      status: parsed.status,
-      isRecurring: parsed.isRecurring,
-      toAccountId: parsed.toAccountId ?? null,
-      createdBy: userId,
-    })
-    .returning();
+  const tx = await db.transaction(async (tx) => {
+    // 1. Verify account belongs to this household (BOLA protection)
+    const account = await tx.query.accounts.findFirst({
+      where: and(eq(accounts.id, parsed.accountId), eq(accounts.householdId, householdId)),
+    });
+    
+    if (!account) {
+      throw new Error("Invalid account or permission denied");
+    }
 
-  // Update account balance
-  const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, parsed.accountId),
-  });
-  if (account) {
+    // 2. Insert transaction
+    const [insertedTx] = await tx
+      .insert(transactions)
+      .values({
+        householdId,
+        accountId: parsed.accountId,
+        categoryId: parsed.categoryId ?? null,
+        memberId: parsed.memberId ?? member.id,
+        businessId: parsed.businessId ?? null,
+        projectId: parsed.projectId ?? null,
+        type: parsed.type,
+        amount: parsed.amount.toString(),
+        currency: parsed.currency,
+        description: parsed.description,
+        date: new Date(parsed.date),
+        referenceNo: parsed.referenceNo ?? null,
+        status: parsed.status,
+        isRecurring: parsed.isRecurring,
+        toAccountId: parsed.toAccountId ?? null,
+        createdBy: userId,
+      })
+      .returning();
+
+    // 3. Update account balance safely
     const current = parseFloat(account.balance);
     const amount = parseFloat(parsed.amount.toString());
-    const newBalance =
-      parsed.type === "income"
-        ? current + amount
-        : current - amount;
-    await db
+    const newBalance = parsed.type === "income" ? current + amount : current - amount;
+    
+    await tx
       .update(accounts)
       .set({ balance: newBalance.toString() })
       .where(eq(accounts.id, parsed.accountId));
-  }
+
+    return insertedTx;
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/transactions");

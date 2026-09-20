@@ -170,7 +170,22 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "No active household" }, { status: 400 });
     }
 
-    const { eq } = await import("drizzle-orm");
+    const { eq, and } = await import("drizzle-orm");
+
+    // BOLA/IDOR protection: Check if user is a member of this household AND is an admin
+    const member = await db.query.householdMembers.findFirst({
+      where: (m) => and(
+        eq(m.householdId, householdId),
+        eq(m.clerkUserId, userId),
+        eq(m.role, "admin"),
+        eq(m.isActive, true)
+      )
+    });
+
+    if (!member) {
+      return NextResponse.json({ error: "Forbidden: Not an admin of this household" }, { status: 403 });
+    }
+
     const [updated] = await db
       .update(households)
       .set({

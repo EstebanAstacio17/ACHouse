@@ -1,5 +1,6 @@
 // ─── Re-exports from DB schema types ─────────────────────────────────────────
 export type { InferSelectModel, InferInsertModel } from "drizzle-orm";
+import { z } from "zod";
 
 // ─── Household Types ──────────────────────────────────────────────────────────
 
@@ -15,6 +16,13 @@ export type Household = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export const createHouseholdSchema = z.object({
+  name: z.string().min(2, "El nombre debe tener al menos 2 caracteres").max(60),
+  currency: z.string().length(3),
+  timezone: z.string(),
+  country: z.string().optional(),
+});
 
 export type HouseholdMember = {
   id: string;
@@ -99,6 +107,23 @@ export type RecurringConfig = {
   endDate?: string;
   maxOccurrences?: number;
 };
+
+export const transactionSchema = z.object({
+  accountId: z.string().min(1),
+  categoryId: z.string().optional(),
+  memberId: z.string().optional(),
+  businessId: z.string().optional(),
+  projectId: z.string().optional(),
+  type: z.enum(["income", "expense", "transfer"]),
+  amount: z.coerce.number().positive(),
+  currency: z.string().length(3).default("USD"),
+  description: z.string().min(1).max(255),
+  date: z.string(),
+  referenceNo: z.string().optional(),
+  status: z.enum(["pending", "cleared", "reconciled"]).default("cleared"),
+  isRecurring: z.boolean().default(false),
+  toAccountId: z.string().optional(),
+});
 
 // ─── Category Types ───────────────────────────────────────────────────────────
 
