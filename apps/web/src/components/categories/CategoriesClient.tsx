@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Plus, Tag, ChevronRight, Pencil, Trash2, X, Check, Layers } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getCategories, createCategory, deleteCategory } from "@/lib/actions/entities";
+import { CategoryIcon, POPULAR_CATEGORY_ICONS } from "./CategoryIcon";
 
 export interface CategoryChild {
   id: string;
@@ -50,7 +51,7 @@ function CategoryModal({
     name: initialData?.name ?? "",
     type: (initialData?.type ?? parent?.type ?? "expense") as "income" | "expense",
     color: initialData?.color ?? parent?.color ?? "#6366f1",
-    icon: initialData?.icon ?? "🏷️",
+    icon: initialData?.icon ?? "tag",
   });
   const [selectedColor, setSelectedColor] = useState(form.color);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -62,7 +63,7 @@ function CategoryModal({
       name: form.name.trim(),
       type: form.type,
       color: selectedColor,
-      icon: form.icon || "🏷️",
+      icon: form.icon || "tag",
       parentId: parent?.id ?? null,
     });
     onClose();
@@ -121,14 +122,42 @@ function CategoryModal({
             </div>
 
             <div className="form-group">
-              <label className="label">Ícono (Emoji)</label>
+              <label className="label">Ícono</label>
+              <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+                {POPULAR_CATEGORY_ICONS.slice(0, 14).map(item => {
+                  const isSelected = form.icon === item.id;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => set("icon", item.id)}
+                      title={item.label}
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: "var(--radius-sm)",
+                        border: isSelected ? `2px solid ${selectedColor}` : "1px solid var(--border-default)",
+                        background: isSelected ? `${selectedColor}25` : "var(--bg-active)",
+                        color: isSelected ? selectedColor : "var(--text-secondary)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      <item.icon size={16} />
+                    </button>
+                  );
+                })}
+              </div>
               <input
                 className="input"
-                placeholder="🏷️"
+                placeholder="Nombre de ícono (ej: shopping-cart) o Emoji (ej: 🛒)"
                 value={form.icon}
                 onChange={e => set("icon", e.target.value)}
-                maxLength={4}
-                style={{ fontSize: "1.25rem" }}
+                maxLength={50}
+                style={{ fontSize: "0.875rem" }}
               />
             </div>
 
@@ -158,7 +187,23 @@ function CategoryModal({
 
             {/* Preview */}
             <div style={{ padding: "0.75rem 1rem", background: "var(--bg-active)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <span style={{ fontSize: "1.375rem" }}>{form.icon || "🏷️"}</span>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "var(--radius-md)",
+                  background: `${selectedColor}20`,
+                  border: `1px solid ${selectedColor}40`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  color: selectedColor,
+                  overflow: "hidden",
+                }}
+              >
+                <CategoryIcon icon={form.icon} size={18} color={selectedColor} />
+              </div>
               <span style={{ fontWeight: 700, color: selectedColor, fontSize: "0.9375rem" }}>
                 {form.name || "Vista previa de categoría"}
               </span>
@@ -396,11 +441,12 @@ export function CategoriesClient() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: "1.25rem",
                       flexShrink: 0,
+                      color: cat.color,
+                      overflow: "hidden",
                     }}
                   >
-                    {cat.icon}
+                    <CategoryIcon icon={cat.icon} size={20} color={cat.color} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <p style={{ fontWeight: 700, fontSize: "0.9375rem", letterSpacing: "-0.01em" }}>{cat.name}</p>
@@ -469,7 +515,19 @@ export function CategoriesClient() {
                       }}
                     >
                       <div style={{ width: 3, height: 20, borderRadius: 2, background: cat.color, flexShrink: 0 }} />
-                      <span style={{ fontSize: "1.125rem" }}>{child.icon}</span>
+                      <div
+                        style={{
+                          width: 24,
+                          height: 24,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                          color: cat.color,
+                        }}
+                      >
+                        <CategoryIcon icon={child.icon} size={16} color={cat.color} />
+                      </div>
                       <span style={{ fontWeight: 600, fontSize: "0.875rem", flex: 1 }}>{child.name}</span>
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
