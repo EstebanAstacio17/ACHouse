@@ -7,7 +7,7 @@ import { COUNTRIES, CURRENCIES, TIMEZONES } from "@/lib/geo";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [step, setStep] = useState<"choice" | "create" | "loading">("choice");
+  const [step, setStep] = useState<"checking" | "choice" | "create" | "loading">("checking");
   const [form, setForm] = useState({
     name: "",
     country: "DO",
@@ -17,16 +17,64 @@ export default function OnboardingPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // If user already has an active household, redirect to dashboard
-    fetch("/api/households")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.households && data.households.length > 0) {
-          router.replace("/dashboard");
+    let active = true;
+
+    // Check if there is an invite token in URL or localStorage
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromUrl = params.get("token") || params.get("invite");
+    let tokenFromStorage: string | null = null;
+    try {
+      tokenFromStorage = localStorage.getItem("achouse_invite_token");
+    } catch {}
+    const token = tokenFromUrl || tokenFromStorage;
+
+    const autoAcceptOrCheck = async () => {
+      // 1. If an invitation token was preserved, try auto-accepting it directly
+      if (token) {
+        try {
+          const acceptRes = await fetch(`/api/invitations/${token}`, { method: "POST" });
+          const acceptJson = await acceptRes.json();
+          if (acceptRes.ok && acceptJson.householdId) {
+            document.cookie = `household_id=${acceptJson.householdId}; path=/; max-age=31536000; SameSite=Lax`;
+            try {
+              localStorage.removeItem("achouse_invite_token");
+            } catch {}
+            window.location.href = "/dashboard";
+            return;
+          }
+        } catch {
+          // ignore
         }
-      })
-      .catch(() => {});
-  }, [router]);
+      }
+
+      // 2. Query households (which also auto-claims pending invites matching the user's email!)
+      try {
+        const res = await fetch("/api/households");
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.households && data.households.length > 0) {
+            try {
+              localStorage.removeItem("achouse_invite_token");
+            } catch {}
+            window.location.href = "/dashboard";
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      if (active) {
+        setStep("choice");
+      }
+    };
+
+    autoAcceptOrCheck();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleCountryChange = (countryCode: string) => {
     const selected = COUNTRIES.find((c) => c.code === countryCode);
@@ -55,14 +103,47 @@ export default function OnboardingPage() {
 
       if (!res.ok) throw new Error("Error al crear el hogar");
 
-      router.push("/dashboard");
-      router.refresh();
+      window.location.href = "/dashboard";
     } catch {
       setTimeout(() => {
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
       }, 800);
     }
   };
+
+  if (step === "checking") {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--bg-base)",
+          gap: "1.25rem",
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            background: "var(--accent-subtle)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Loader2 size={32} color="var(--accent)" style={{ animation: "spin 1s linear infinite" }} />
+        </div>
+        <p style={{ color: "var(--text-secondary)", fontSize: "1.0625rem", fontWeight: 600 }}>
+          Comprobando tu acceso al hogar...
+        </p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   if (step === "loading") {
     return (

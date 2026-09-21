@@ -2,7 +2,8 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@achouse/db";
-import { households, householdMembers, categories, accounts } from "@achouse/db/schema";
+import { households, householdMembers, categories, accounts, householdInvitations } from "@achouse/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 const createHouseholdSchema = z.object({
@@ -131,14 +132,103 @@ export async function GET() {
       with: { household: true },
     });
 
-    const myHouseholds = members.map((m) => ({
+    let myHouseholds = members.map((m) => ({
       ...m.household,
       role: m.role,
       memberId: m.id,
     }));
 
     const cookieStore = await cookies();
-    const existingCookie = cookieStore.get("household_id")?.value;
+    let existingCookie = cookieStore.get("household_id")?.value;
+
+    // If user has no active household memberships yet, check if they have a pending invitation!
+    if (myHouseholds.length === 0) {
+      const user = await currentUser();
+      const userEmails = (user?.emailAddresses || [])
+        .map((e) => e.emailAddress.trim().toLowerCase())
+        .filter(Boolean);
+
+      const pendingInviteToken = cookieStore.get("invite_token")?.value;
+
+      let invite = null;
+      if (pendingInviteToken) {
+        invite = await db.query.householdInvitations.findFirst({
+          where: and(
+            eq(householdInvitations.token, pendingInviteToken),
+            eq(householdInvitations.status, "pending")
+          ),
+          with: { household: true },
+        });
+      }
+
+      if (!invite && userEmails.length > 0) {
+        invite = await db.query.householdInvitations.findFirst({
+          where: (inv, { inArray, and, eq }) =>
+            and(inArray(inv.email, userEmails), eq(inv.status, "pending")),
+          with: { household: true },
+        });
+      }
+
+      // If an invitation was found, automatically claim & connect this user!
+      if (invite && new Date(invite.expiresAt) > new Date()) {
+        const token = invite.token;
+        const pendingMember = await db.query.householdMembers.findFirst({
+          where: and(
+            eq(householdMembers.householdId, invite.householdId),
+            eq(householdMembers.clerkUserId, `pending_${token}`)
+          ),
+        });
+
+        const realName =
+          `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() ||
+          user?.username ||
+          user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ||
+          pendingMember?.displayName ||
+          "Nuevo Miembro";
+
+        let memberId = "";
+        if (pendingMember) {
+          await db
+            .update(householdMembers)
+            .set({
+              clerkUserId: userId,
+              displayName: realName,
+              avatarUrl: user?.imageUrl || pendingMember.avatarUrl,
+              role: invite.role,
+              isActive: true,
+            })
+            .where(eq(householdMembers.id, pendingMember.id));
+          memberId = pendingMember.id;
+        } else {
+          const [newMem] = await db
+            .insert(householdMembers)
+            .values({
+              householdId: invite.householdId,
+              clerkUserId: userId,
+              role: invite.role,
+              displayName: realName,
+              avatarUrl: user?.imageUrl,
+              isActive: true,
+            })
+            .returning();
+          memberId = newMem.id;
+        }
+
+        await db
+          .update(householdInvitations)
+          .set({ status: "accepted" })
+          .where(eq(householdInvitations.id, invite.id));
+
+        myHouseholds = [
+          {
+            ...invite.household,
+            role: invite.role,
+            memberId,
+          },
+        ];
+        existingCookie = invite.householdId;
+      }
+    }
 
     const res = NextResponse.json({
       households: myHouseholds,
@@ -146,12 +236,13 @@ export async function GET() {
     });
 
     // If no active household cookie was set, but user has a household, auto-set cookie
-    if (!existingCookie && myHouseholds.length > 0 && myHouseholds[0]?.id) {
-      res.cookies.set("household_id", myHouseholds[0].id, {
+    if (myHouseholds.length > 0 && myHouseholds[0]?.id) {
+      res.cookies.set("household_id", existingCookie || myHouseholds[0].id, {
         path: "/",
         sameSite: "lax",
         maxAge: 31536000,
       });
+      res.cookies.delete("invite_token");
     }
 
     return res;

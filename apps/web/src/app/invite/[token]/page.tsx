@@ -27,6 +27,12 @@ export default function InviteAcceptPage({
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    // Store invite token in cookie and localStorage so auth flows preserve it
+    document.cookie = `invite_token=${token}; path=/; max-age=604800; SameSite=Lax`;
+    try {
+      localStorage.setItem("achouse_invite_token", token);
+    } catch {}
+
     fetch(`/api/invitations/${token}`)
       .then(async (res) => {
         const json = await res.json();
@@ -52,11 +58,25 @@ export default function InviteAcceptPage({
     try {
       const res = await fetch(`/api/invitations/${token}`, { method: "POST" });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Error al unirte al hogar");
+      if (!res.ok) {
+        // If unauthenticated, redirect to sign-up preserving invitation link
+        if (res.status === 401) {
+          const returnUrl = encodeURIComponent(`/invite/${token}`);
+          window.location.href = `/sign-up?redirect_url=${returnUrl}`;
+          return;
+        }
+        throw new Error(json.error || "Error al unirte al hogar");
+      }
       setSuccess(true);
+      if (json.householdId) {
+        document.cookie = `household_id=${json.householdId}; path=/; max-age=31536000; SameSite=Lax`;
+      }
+      try {
+        localStorage.removeItem("achouse_invite_token");
+      } catch {}
       setTimeout(() => {
-        router.push("/dashboard");
-      }, 1200);
+        window.location.href = "/dashboard";
+      }, 900);
     } catch (err: any) {
       setError(err?.message || "Error al unirte al hogar");
       setAccepting(false);
