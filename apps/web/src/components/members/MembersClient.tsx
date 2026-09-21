@@ -82,21 +82,26 @@ function InviteModal({
     }
   };
 
+  const activeUrl =
+    typeof window !== "undefined" && window.location.origin && !window.location.origin.includes("localhost")
+      ? `${window.location.origin}/invite/${inviteResult?.token || ""}`
+      : inviteResult?.inviteUrl || (typeof window !== "undefined" ? `${window.location.origin}/invite/${inviteResult?.token || ""}` : "");
+
   const handleCopyLink = () => {
-    if (!inviteResult?.inviteUrl) return;
-    navigator.clipboard.writeText(inviteResult.inviteUrl);
+    if (!activeUrl) return;
+    navigator.clipboard.writeText(activeUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
 
   if (inviteResult) {
     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
-      `¡Hola ${inviteResult.name}! Te invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas. Haz clic aquí para entrar: ${inviteResult.inviteUrl}`
+      `¡Hola ${inviteResult.name}! Te invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas. Haz clic aquí para entrar: ${activeUrl}`
     )}`;
     const mailtoUrl = `mailto:${inviteResult.email}?subject=${encodeURIComponent(
       "Invitación a nuestro hogar en ACHouse"
     )}&body=${encodeURIComponent(
-      `¡Hola ${inviteResult.name}!\n\nTe invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas.\n\nAccede a través del siguiente enlace:\n${inviteResult.inviteUrl}`
+      `¡Hola ${inviteResult.name}!\n\nTe invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas.\n\nAccede a través del siguiente enlace:\n${activeUrl}`
     )}`;
 
     return (
@@ -134,7 +139,7 @@ function InviteModal({
                 <input
                   className="input"
                   readOnly
-                  value={inviteResult.inviteUrl}
+                  value={activeUrl}
                   style={{ fontSize: "0.8125rem", background: "var(--bg-card-alt)", cursor: "text" }}
                   onClick={e => (e.target as HTMLInputElement).select()}
                 />

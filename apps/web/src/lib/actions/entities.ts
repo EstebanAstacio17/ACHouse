@@ -6,8 +6,39 @@ import { categories, accounts, householdMembers, householdInvitations } from "@a
 import { eq, and, isNull } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { getActiveHouseholdId } from "@/lib/household";
+
+async function resolveBaseUrl(): Promise<string> {
+  // 1. Check request headers from incoming request
+  try {
+    const headersList = await headers();
+    const host = headersList.get("x-forwarded-host") || headersList.get("host");
+    const proto = headersList.get("x-forwarded-proto") || "https";
+    if (host && !host.includes("localhost")) {
+      return `${proto}://${host}`;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Check Vercel production deployment URLs
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  // 3. Check NEXT_PUBLIC_APP_URL
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (envUrl && !envUrl.includes("localhost")) {
+    return envUrl;
+  }
+
+  return envUrl || "http://localhost:3000";
+}
 
 async function getAuthContext() {
   const { userId } = await auth();
@@ -267,8 +298,8 @@ export async function inviteMember(data: {
     })
     .returning();
 
-  // 3. Construct direct invitation URL
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  // 3. Construct direct invitation URL (dynamically resolving production domain)
+  const baseUrl = await resolveBaseUrl();
   const inviteUrl = `${baseUrl}/invite/${token}`;
 
   // 4. Try sending invitation email via Clerk Backend API if available

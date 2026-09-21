@@ -68,7 +68,12 @@ export async function POST(
       })
       .returning();
 
-    const inviteUrl = `${new URL(req.url).origin}/invite/${token}`;
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+    const origin = host && !host.includes("localhost")
+      ? `${proto}://${host}`
+      : (process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin);
+    const inviteUrl = `${origin}/invite/${token}`;
 
     return NextResponse.json({ invitation, inviteUrl }, { status: 201 });
   } catch (error) {
