@@ -91,15 +91,40 @@ export async function POST(
           .where(eq(householdMembers.id, existingMember.id));
       }
     } else {
-      // Create new member
-      await db.insert(householdMembers).values({
-        householdId: invite.householdId,
-        clerkUserId: userId,
-        role: invite.role,
-        displayName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.username || "Nuevo Miembro",
-        avatarUrl: user.imageUrl,
-        isActive: true,
+      // Check if there is a pending member created for this invitation
+      const pendingMember = await db.query.householdMembers.findFirst({
+        where: and(
+          eq(householdMembers.householdId, invite.householdId),
+          eq(householdMembers.clerkUserId, `pending_${token}`)
+        ),
       });
+
+      if (pendingMember) {
+        await db
+          .update(householdMembers)
+          .set({
+            clerkUserId: userId,
+            displayName:
+              `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() ||
+              pendingMember.displayName ||
+              user.username ||
+              "Nuevo Miembro",
+            avatarUrl: user.imageUrl || pendingMember.avatarUrl,
+            role: invite.role,
+            isActive: true,
+          })
+          .where(eq(householdMembers.id, pendingMember.id));
+      } else {
+        // Create new member
+        await db.insert(householdMembers).values({
+          householdId: invite.householdId,
+          clerkUserId: userId,
+          role: invite.role,
+          displayName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.username || "Nuevo Miembro",
+          avatarUrl: user.imageUrl,
+          isActive: true,
+        });
+      }
     }
 
     // Mark invitation as accepted
@@ -108,7 +133,14 @@ export async function POST(
       .set({ status: "accepted" })
       .where(eq(householdInvitations.id, invite.id));
 
-    return NextResponse.json({ success: true, householdId: invite.householdId });
+    const res = NextResponse.json({ success: true, householdId: invite.householdId });
+    res.cookies.set("household_id", invite.householdId, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    return res;
   } catch (error) {
     console.error("[POST accept invitation]", error);
     return NextResponse.json({ error: "Error al aceptar la invitación" }, { status: 500 });

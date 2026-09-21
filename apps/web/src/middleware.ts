@@ -16,6 +16,7 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
+const isInviteRoute = createRouteMatcher(["/invite(.*)"]);
 
 // When valid Clerk keys are configured, protect routes with Clerk
 const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
@@ -40,7 +41,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   const metadata = sessionClaims?.metadata as Record<string, unknown> | undefined;
   const hasHousehold = Boolean(householdCookie || metadata?.householdId);
 
-  if (!hasHousehold && !isOnboardingRoute(req)) {
+  if (!hasHousehold && !isOnboardingRoute(req) && !isInviteRoute(req)) {
     return NextResponse.redirect(new URL("/onboarding", req.url));
   }
 

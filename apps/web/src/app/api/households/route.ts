@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@achouse/db";
@@ -64,12 +64,20 @@ export async function POST(req: Request) {
       throw new Error("Failed to create household");
     }
 
-    // 2. Add creator as admin member
+    // 2. Add creator as admin member with real name
+    const user = await currentUser();
+    const creatorName = user
+      ? [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+        user.username ||
+        user.emailAddresses?.[0]?.emailAddress?.split("@")[0] ||
+        "Miembro"
+      : "Miembro";
+
     await db.insert(householdMembers).values({
       householdId: household.id,
       clerkUserId: userId,
       role: "admin",
-      displayName: "Administrador",
+      displayName: creatorName,
     });
 
     // 3. Seed default categories

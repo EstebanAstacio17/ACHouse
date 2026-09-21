@@ -57,11 +57,9 @@ export default function InviteAcceptPage({
       setTimeout(() => {
         router.push("/dashboard");
       }, 1200);
-    } catch {
-      setSuccess(true);
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 1200);
+    } catch (err: any) {
+      setError(err?.message || "Error al unirte al hogar");
+      setAccepting(false);
     }
   };
 

@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react";
 import {
   Plus, UserCircle, Shield, Eye, Pencil, Trash2, X, Check,
-  Mail, Briefcase, TrendingUp, DollarSign, UserCheck, AlertCircle, Building2
+  Mail, Briefcase, TrendingUp, DollarSign, UserCheck, AlertCircle, Building2,
+  CheckCircle2, Copy, Clock, Share2, Loader2
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
-import { getMembers, updateMemberRole } from "@/lib/actions/entities";
+import { getMembers, updateMemberRole, inviteMember, removeMember } from "@/lib/actions/entities";
 
 const ROLE_CONFIG = {
   admin: { label: "Administrador", color: "var(--accent)", Icon: Shield, bg: "var(--accent-subtle)" },
@@ -21,6 +22,8 @@ export interface MemberItem {
   email?: string;
   avatarUrl?: string | null;
   isActive: boolean;
+  isPendingInvite?: boolean;
+  inviteToken?: string;
   incomeSources: Array<{
     id?: string;
     name: string;
@@ -40,18 +43,141 @@ function InviteModal({
   onInvite,
 }: {
   onClose: () => void;
-  onInvite: (email: string, role: "admin" | "contributor" | "viewer", name: string) => void;
+  onInvite: (email: string, role: "admin" | "contributor" | "viewer", name: string) => Promise<any>;
 }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"admin" | "contributor" | "viewer">("contributor");
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{
+    inviteUrl: string;
+    token: string;
+    emailSent: boolean;
+    email: string;
+    name: string;
+  } | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) return;
-    onInvite(email, role, name || email.split("@")[0]);
-    onClose();
+    if (!email || loading) return;
+    setLoading(true);
+    try {
+      const res = await onInvite(email, role, name || email.split("@")[0]);
+      if (res && res.inviteUrl) {
+        setInviteResult({
+          inviteUrl: res.inviteUrl,
+          token: res.token,
+          emailSent: Boolean(res.emailSent),
+          email,
+          name: name || email.split("@")[0],
+        });
+      } else {
+        onClose();
+      }
+    } catch {
+      // toast shown in onInvite
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleCopyLink = () => {
+    if (!inviteResult?.inviteUrl) return;
+    navigator.clipboard.writeText(inviteResult.inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  if (inviteResult) {
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
+      `¡Hola ${inviteResult.name}! Te invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas. Haz clic aquí para entrar: ${inviteResult.inviteUrl}`
+    )}`;
+    const mailtoUrl = `mailto:${inviteResult.email}?subject=${encodeURIComponent(
+      "Invitación a nuestro hogar en ACHouse"
+    )}&body=${encodeURIComponent(
+      `¡Hola ${inviteResult.name}!\n\nTe invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas.\n\nAccede a través del siguiente enlace:\n${inviteResult.inviteUrl}`
+    )}`;
+
+    return (
+      <div
+        className="overlay"
+        style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+        onClick={e => e.target === e.currentTarget && onClose()}
+      >
+        <div className="modal" style={{ width: "min(490px, 95vw)" }}>
+          <div className="modal-header">
+            <h2 style={{ fontWeight: 700, fontSize: "1.0625rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <CheckCircle2 size={18} color="var(--color-income)" />
+              ¡Invitación Lista para Compartir!
+            </h2>
+            <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
+          </div>
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "1.125rem" }}>
+            <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", margin: 0 }}>
+              <strong>{inviteResult.name}</strong> ha sido agregado al hogar y registrado exitosamente en el sistema.
+            </p>
+
+            {inviteResult.emailSent ? (
+              <div style={{ background: "var(--color-income-dim)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "var(--radius-md)", padding: "0.75rem", fontSize: "0.8125rem", color: "var(--color-income)" }}>
+                ✓ Se ha enviado una notificación automática a <strong>{inviteResult.email}</strong>.
+              </div>
+            ) : (
+              <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "var(--radius-md)", padding: "0.75rem", fontSize: "0.8125rem", color: "var(--color-warning)" }}>
+                ℹ️ Para entrega inmediata, comparte el enlace directo de acceso con el integrante:
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="label">Enlace de acceso directo</label>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  className="input"
+                  readOnly
+                  value={inviteResult.inviteUrl}
+                  style={{ fontSize: "0.8125rem", background: "var(--bg-card-alt)", cursor: "text" }}
+                  onClick={e => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  type="button"
+                  className={copied ? "btn btn-primary" : "btn btn-secondary"}
+                  onClick={handleCopyLink}
+                  style={{ flexShrink: 0 }}
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                  {copied ? "¡Copiado!" : "Copiar"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.625rem" }}>
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-secondary"
+                style={{ textDecoration: "none", fontSize: "0.8125rem", justifyContent: "center", gap: "0.375rem" }}
+              >
+                <Share2 size={14} color="#25D366" /> WhatsApp
+              </a>
+              <a
+                href={mailtoUrl}
+                className="btn btn-secondary"
+                style={{ textDecoration: "none", fontSize: "0.8125rem", justifyContent: "center", gap: "0.375rem" }}
+              >
+                <Mail size={14} /> Enviar por Correo
+              </a>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-primary" onClick={onClose} style={{ width: "100%" }}>
+              Listo / Finalizar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -125,9 +251,17 @@ function InviteModal({
             </div>
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary">
-              <Mail size={15} /> Enviar Invitación
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>Cancelar</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" /> Registrando...
+                </>
+              ) : (
+                <>
+                  <Mail size={15} /> Enviar Invitación
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -247,6 +381,8 @@ export function MembersClient() {
               email: m.email || undefined,
               avatarUrl: m.avatarUrl || null,
               isActive: m.isActive ?? true,
+              isPendingInvite: m.isPendingInvite ?? false,
+              inviteToken: m.inviteToken || undefined,
               incomeSources: (m.incomeSources || []).map((s: any) => ({
                 id: s.id,
                 name: s.name,
@@ -271,20 +407,37 @@ export function MembersClient() {
   const totalHouseholdIncome = members.reduce((sum, m) => sum + m.monthlyIncome, 0);
   const totalHouseholdExpenses = members.reduce((sum, m) => sum + m.monthlyExpenses, 0);
 
-  const handleInviteMember = (email: string, role: "admin" | "contributor" | "viewer", name: string) => {
-    const newMember: MemberItem = {
-      id: String(Date.now()),
-      displayName: name,
-      email,
-      role,
-      avatarUrl: null,
-      isActive: true,
-      incomeSources: [],
-      monthlyIncome: 0,
-      monthlyExpenses: 0,
-    };
-    setMembers(prev => [...prev, newMember]);
-    toast.success(`Invitación enviada exitosamente a ${email}`);
+  const handleInviteMember = async (email: string, role: "admin" | "contributor" | "viewer", name: string) => {
+    try {
+      const res = await inviteMember({ email, role, name });
+      if (res.success && res.member) {
+        setMembers(prev => [
+          ...prev,
+          {
+            id: res.member.id,
+            displayName: res.member.displayName,
+            role: res.member.role as any,
+            email: res.member.email,
+            avatarUrl: null,
+            isActive: true,
+            isPendingInvite: true,
+            inviteToken: res.token,
+            incomeSources: [],
+            monthlyIncome: 0,
+            monthlyExpenses: 0,
+          },
+        ]);
+        if (res.emailSent) {
+          toast.success(`Invitación enviada por correo a ${email}`);
+        } else {
+          toast.info(`Invitación registrada. Puedes compartir el enlace directo.`);
+        }
+        return res;
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al invitar integrante");
+      throw err;
+    }
   };
 
   const handleAddSource = (source: { name: string; type: "job" | "business" | "project"; expectedMonthlyAmount: string; currency: string }) => {
@@ -306,10 +459,22 @@ export function MembersClient() {
     toast.success(`Fuente "${source.name}" añadida`);
   };
 
-  const handleDeleteMember = (memberId: string) => {
+  const handleCopyInviteLink = (token?: string) => {
+    if (!token) return;
+    const url = `${window.location.origin}/invite/${token}`;
+    navigator.clipboard.writeText(url);
+    toast.success("¡Enlace de invitación copiado al portapapeles!");
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
     if (window.confirm("¿Seguro que deseas remover a este integrante del hogar?")) {
-      setMembers(prev => prev.filter(m => m.id !== memberId));
-      toast.info("Integrante removido del hogar");
+      try {
+        await removeMember(memberId);
+        setMembers(prev => prev.filter(m => m.id !== memberId));
+        toast.info("Integrante removido del hogar");
+      } catch (err: any) {
+        toast.error(err?.message || "Error al remover integrante");
+      }
     }
   };
 
@@ -421,32 +586,64 @@ export function MembersClient() {
                     <div>
                       <p style={{ fontWeight: 700, fontSize: "1.0625rem" }}>{member.displayName}</p>
                       {member.email && <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{member.email}</p>}
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "0.25rem",
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                          color: roleCfg.color,
-                          background: roleCfg.bg,
-                          padding: "0.15rem 0.5rem",
-                          borderRadius: 999,
-                          marginTop: "0.25rem",
-                        }}
-                      >
-                        <roleCfg.Icon size={12} /> {roleCfg.label}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap", marginTop: "0.25rem" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.25rem",
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            color: roleCfg.color,
+                            background: roleCfg.bg,
+                            padding: "0.15rem 0.5rem",
+                            borderRadius: 999,
+                          }}
+                        >
+                          <roleCfg.Icon size={12} /> {roleCfg.label}
+                        </span>
+                        {member.isPendingInvite && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "0.25rem",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                              color: "#d97706",
+                              background: "rgba(245, 158, 11, 0.12)",
+                              border: "1px solid rgba(245, 158, 11, 0.28)",
+                              padding: "0.15rem 0.5rem",
+                              borderRadius: 999,
+                            }}
+                            title="Invitación enviada pendiente de aceptación"
+                          >
+                            <Clock size={11} /> Pendiente
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <button
-                    className="btn btn-ghost btn-icon btn-sm"
-                    style={{ color: "var(--color-expense)" }}
-                    onClick={() => handleDeleteMember(member.id)}
-                    title="Remover integrante"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                    {member.isPendingInvite && member.inviteToken && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem", color: "var(--accent)" }}
+                        onClick={() => handleCopyInviteLink(member.inviteToken)}
+                        title="Copiar enlace de invitación"
+                      >
+                        <Copy size={13} /> Copiar Enlace
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      style={{ color: "var(--color-expense)" }}
+                      onClick={() => handleDeleteMember(member.id)}
+                      title="Remover integrante"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Member Contribution KPIs */}

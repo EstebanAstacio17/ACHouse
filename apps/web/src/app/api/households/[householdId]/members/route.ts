@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
 import { householdMembers, memberIncomeSources, transactions } from "@achouse/db/schema";
 import { requireRole } from "@/lib/auth-guard";
@@ -24,6 +25,46 @@ export async function GET(
         incomeSources: true,
       },
     });
+
+    // Auto-resolve real names for any member whose displayName was defaulted to their role
+    try {
+      const client = await clerkClient();
+      for (const m of members) {
+        const lower = (m.displayName || "").trim().toLowerCase();
+        if (
+          !m.displayName ||
+          lower === "administrador" ||
+          lower === "admin" ||
+          lower === "colaborador" ||
+          lower === "contributor" ||
+          lower === "lector" ||
+          lower === "viewer" ||
+          lower === "miembro" ||
+          lower === "nuevo miembro"
+        ) {
+          try {
+            const clerkUser = await client.users.getUser(m.clerkUserId);
+            if (clerkUser) {
+              const realName =
+                [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ").trim() ||
+                clerkUser.username ||
+                clerkUser.emailAddresses?.[0]?.emailAddress?.split("@")[0];
+              if (realName) {
+                await db
+                  .update(householdMembers)
+                  .set({ displayName: realName })
+                  .where(eq(householdMembers.id, m.id));
+                m.displayName = realName;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     // Calculate aggregated income and expenses per member
     const enrichedMembers = await Promise.all(
