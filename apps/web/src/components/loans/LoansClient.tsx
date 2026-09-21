@@ -48,7 +48,7 @@ const INITIAL_LOANS: LoanItem[] = [];
 const INITIAL_CARDS: CreditCardItem[] = [];
 
 const PAYING_ACCOUNTS = [
-  { id: "a1", name: "Cuenta Principal", balance: 0 },
+  { id: "a1", name: "Cuenta Principal", balance: 0, currency: "DOP" },
 ];
 
 // ─── Modal: Nuevo Préstamo ─────────────────────────────────────────────────────
@@ -375,7 +375,7 @@ function PayLoanModal({
   loan: LoanItem;
   onClose: () => void;
   onPay: (loanId: string, amount: number, accountId: string) => void;
-  accounts?: Array<{ id: string; name: string; balance: number }>;
+  accounts?: Array<{ id: string; name: string; balance: number; currency?: string }>;
 }) {
   const [amount, setAmount] = useState(String(loan.monthlyPayment.toFixed(2)));
   const [accountId, setAccountId] = useState(accounts[0]?.id || "");
@@ -441,7 +441,7 @@ function PayCardModal({
   card: CreditCardItem;
   onClose: () => void;
   onPay: (cardId: string, amount: number, accountId: string) => void;
-  accounts?: Array<{ id: string; name: string; balance: number }>;
+  accounts?: Array<{ id: string; name: string; balance: number; currency?: string }>;
 }) {
   const [payType, setPayType] = useState<"total" | "minimum" | "custom">("total");
   const [customAmount, setCustomAmount] = useState("");
