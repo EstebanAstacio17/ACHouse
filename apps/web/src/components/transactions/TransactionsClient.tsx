@@ -91,8 +91,18 @@ function TransactionModal({
   membersList: Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>;
   currentMemberId?: string;
 }) {
+  const normalizeType = (t?: string | null) => {
+    if (!t) return "";
+    const s = String(t).toLowerCase().trim();
+    if (s === "income" || s === "ingreso" || s === "ingresos") return "income";
+    if (s === "expense" || s === "egreso" || s === "egresos") return "expense";
+    if (s === "transfer" || s === "transferencia" || s === "transferencias") return "transfer";
+    return s;
+  };
+
   const initialType = (initialData?.type ?? "expense") as "income" | "expense" | "transfer";
-  const matchingInitialCats = categoriesList.filter(c => !c.type || c.type === initialType);
+  const initialNormType = normalizeType(initialType);
+  const matchingInitialCats = categoriesList.filter(c => normalizeType(c.type) === initialNormType);
   const defaultCatId = initialData?.category?.id || (matchingInitialCats.find(c => c.name === initialData?.category?.name)?.id ?? (matchingInitialCats[0]?.id || ""));
 
   const initialMemberId = useMemo(() => {
@@ -107,6 +117,8 @@ function TransactionModal({
     if (currentM) return currentM.id;
     return membersList[0]?.id || "";
   }, [initialData, currentMemberId, membersList]);
+
+  const [memberManuallySelected, setMemberManuallySelected] = useState(false);
 
   const [form, setForm] = useState({
     type: initialType,
@@ -125,7 +137,7 @@ function TransactionModal({
   });
 
   useEffect(() => {
-    if (!initialData && currentMemberId && form.memberId !== currentMemberId) {
+    if (!initialData && !memberManuallySelected && currentMemberId) {
       set("memberId", currentMemberId);
     } else if (!form.memberId && membersList.length > 0) {
       const target = (currentMemberId && membersList.find(m => m.id === currentMemberId))
@@ -135,27 +147,29 @@ function TransactionModal({
         set("memberId", target.id);
       }
     }
-  }, [membersList, form.memberId, currentMemberId, initialData]);
+  }, [membersList, form.memberId, currentMemberId, initialData, memberManuallySelected]);
 
   const [fileName, setFileName] = useState<string>("");
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   const handleTypeChange = (newType: "income" | "expense" | "transfer") => {
+    const targetNorm = normalizeType(newType);
     setForm(prev => {
-      const matchingCats = categoriesList.filter(c => !c.type || c.type === newType);
+      const matchingCats = categoriesList.filter(c => normalizeType(c.type) === targetNorm);
       const stillValid = matchingCats.some(c => c.id === prev.categoryId);
       return {
         ...prev,
         type: newType,
-        categoryId: newType === "transfer" ? "" : (stillValid ? prev.categoryId : (matchingCats[0]?.id || "")),
+        categoryId: targetNorm === "transfer" ? "" : (stillValid ? prev.categoryId : (matchingCats[0]?.id || "")),
       };
     });
   };
 
   const filteredCategories = useMemo(() => {
-    if (form.type === "transfer") return [];
-    return categoriesList.filter(c => !c.type || c.type === form.type);
+    const targetNorm = normalizeType(form.type);
+    if (targetNorm === "transfer") return [];
+    return categoriesList.filter(c => normalizeType(c.type) === targetNorm);
   }, [categoriesList, form.type]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -339,7 +353,14 @@ function TransactionModal({
             {/* Member */}
             <div className="form-group">
               <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
-              <select className="input" value={form.memberId} onChange={e => set("memberId", e.target.value)}>
+              <select
+                className="input"
+                value={form.memberId}
+                onChange={e => {
+                  setMemberManuallySelected(true);
+                  set("memberId", e.target.value);
+                }}
+              >
                 {membersList.length === 0 ? (
                   <option value="">Cargando integrantes del hogar...</option>
                 ) : (
