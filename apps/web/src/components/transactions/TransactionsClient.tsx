@@ -12,6 +12,7 @@ import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ui/ToastContext";
 import { useUser } from "@clerk/nextjs";
+import { formatMoney } from "@/lib/geo";
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "@/lib/actions/transactions";
 import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
 import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
@@ -86,6 +87,7 @@ function TransactionModal({
   businessesList = [],
   currentMemberId,
   defaultBusinessId,
+  householdCurrency = "DOP",
 }: {
   onClose: () => void;
   onSave: (tx: Partial<TransactionItem>) => void;
@@ -96,6 +98,7 @@ function TransactionModal({
   businessesList?: Array<{ id: string; name: string; type?: string }>;
   currentMemberId?: string;
   defaultBusinessId?: string;
+  householdCurrency?: string;
 }) {
   const normalizeType = (t?: string | null) => {
     if (!t) return "";
@@ -340,7 +343,7 @@ function TransactionModal({
       description: cleanDesc,
       type: form.type as any,
       amount: amountNum.toFixed(2),
-      currency: selectedAcc?.currency || "DOP",
+      currency: selectedAcc?.currency || householdCurrency || "DOP",
       date: new Date(form.date + "T12:00:00"),
       status: form.status as any,
       category: selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color || "#6366f1" } : null,
@@ -760,6 +763,7 @@ function TransactionModal({
 export function TransactionsClient() {
   const toast = useToast();
   const { user } = useUser();
+  const [householdCurrency, setHouseholdCurrency] = useState("DOP");
   const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
   const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string; type?: "income" | "expense" }>>([]);
@@ -828,6 +832,19 @@ export function TransactionsClient() {
 
   useEffect(() => {
     let active = true;
+    fetch("/api/households")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!active) return;
+        if (d?.households && d.households.length > 0) {
+          const activeH = d.households.find((h: any) => h.id === d.activeHouseholdId) || d.households[0];
+          if (activeH?.defaultCurrency) {
+            setHouseholdCurrency(activeH.defaultCurrency);
+          }
+        }
+      })
+      .catch(() => {});
+
     Promise.all([
       getTransactions({ perPage: 100 }),
       getAccounts(),
@@ -874,12 +891,14 @@ export function TransactionsClient() {
                 bizObj = { id: matchBiz.id, name: matchBiz.name };
               }
             }
+            const txAcc = accs?.find((a: any) => a.id === t.accountId) || t.account;
+            const resolvedCurr = (t.currency && t.currency !== "USD") ? t.currency : (txAcc?.currency || "DOP");
             return {
               id: t.id,
               description: t.description,
               type: t.type as any,
               amount: String(t.amount),
-              currency: t.currency || "DOP",
+              currency: resolvedCurr,
               date: new Date(t.date),
               status: t.status as any,
               category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
@@ -960,12 +979,8 @@ export function TransactionsClient() {
     expense: filtered.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount), 0),
   }), [filtered]);
 
-  const fmt = (n: number, currency = "DOP") => {
-    try {
-      return n.toLocaleString("es-DO", { style: "currency", currency });
-    } catch {
-      return `${currency} ${n.toFixed(2)}`;
-    }
+  const fmt = (n: number | string, currency?: string) => {
+    return formatMoney(n, currency || householdCurrency || "DOP");
   };
 
   const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
@@ -975,6 +990,8 @@ export function TransactionsClient() {
         const match = businessesList.find(b => b.name.toLowerCase().trim() === saved.category?.name.toLowerCase().trim());
         if (match) resolvedBiz = { id: match.id, name: match.name };
       }
+
+      const txCurrency = saved.currency || accountsList.find(a => a.id === saved.account?.id)?.currency || householdCurrency || "DOP";
 
       if (saved.id) {
         const res = await updateTransaction(saved.id, {
@@ -992,13 +1009,14 @@ export function TransactionsClient() {
           toast.error(res.error || "Error al actualizar la transacción");
           return;
         }
-        setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved, business: resolvedBiz || null } as TransactionItem : t));
+        setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved, currency: txCurrency, business: resolvedBiz || null } as TransactionItem : t));
         toast.success("Transacción actualizada exitosamente");
       } else {
         const res = await createTransaction({
           description: saved.description!,
           amount: parseFloat(saved.amount || "0"),
           type: saved.type!,
+          currency: txCurrency,
           accountId: saved.account?.id || (accountsList[0]?.id ?? ""),
           toAccountId: saved.toAccount?.id || undefined,
           categoryId: saved.category?.id || undefined,
@@ -1018,7 +1036,7 @@ export function TransactionsClient() {
           description: created.description,
           type: created.type as any,
           amount: String(created.amount),
-          currency: created.currency || saved.currency || "DOP",
+          currency: created.currency || txCurrency,
           date: new Date(created.date),
           status: created.status as any,
           category: saved.category || null,
@@ -1086,6 +1104,7 @@ export function TransactionsClient() {
           businessesList={businessesList}
           currentMemberId={currentMemberId}
           defaultBusinessId={filterBusiness !== "all" && filterBusiness !== "none" ? filterBusiness : undefined}
+          householdCurrency={householdCurrency}
         />
       )}
 
@@ -1137,11 +1156,11 @@ export function TransactionsClient() {
         {/* Summary Cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
           {[
-            { label: "Total Ingresos", value: fmt(totals.income), color: "var(--color-income)", bg: "var(--color-income-dim)", icon: ArrowUpCircle },
-            { label: "Total Egresos", value: fmt(totals.expense), color: "var(--color-expense)", bg: "var(--color-expense-dim)", icon: ArrowDownCircle },
+            { label: "Total Ingresos", value: fmt(totals.income, householdCurrency), color: "var(--color-income)", bg: "var(--color-income-dim)", icon: ArrowUpCircle },
+            { label: "Total Egresos", value: fmt(totals.expense, householdCurrency), color: "var(--color-expense)", bg: "var(--color-expense-dim)", icon: ArrowDownCircle },
             {
               label: "Balance Neto",
-              value: ((totals.income - totals.expense) >= 0 ? "+" : "") + fmt(totals.income - totals.expense),
+              value: ((totals.income - totals.expense) >= 0 ? "+" : "-") + fmt(Math.abs(totals.income - totals.expense), householdCurrency),
               color: (totals.income - totals.expense) >= 0 ? "var(--color-income)" : "var(--color-expense)",
               bg: (totals.income - totals.expense) >= 0 ? "var(--color-income-dim)" : "var(--color-expense-dim)",
               icon: ArrowLeftRight
@@ -1333,7 +1352,7 @@ export function TransactionsClient() {
                       <td style={{ textAlign: "right" }}>
                         <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: typeCfg.color }}>
                           {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                          {fmt(parseFloat(tx.amount), tx.currency || "DOP")}
+                          {fmt(Math.abs(parseFloat(tx.amount)), tx.currency || householdCurrency || "DOP")}
                         </span>
                       </td>
                       <td style={{ textAlign: "center" }}>

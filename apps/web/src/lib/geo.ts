@@ -83,17 +83,29 @@ export const TIMEZONES: TimezoneOption[] = [
 ];
 
 export function getCurrencySymbol(code: string): string {
-  const found = CURRENCIES.find(c => c.code === code);
+  if (!code) return "RD$";
+  const found = CURRENCIES.find(c => c.code.toUpperCase() === code.toUpperCase());
   return found ? found.symbol : code;
 }
 
-export function formatMoney(amount: number | string, currencyCode: string = "DOP"): string {
-  const numeric = typeof amount === "number" ? amount : parseFloat(amount || "0");
-  const symbol = getCurrencySymbol(currencyCode);
+export function formatMoney(
+  amount: number | string | null | undefined,
+  currencyCode: string = "DOP",
+  options?: { showPlusSign?: boolean }
+): string {
+  const numeric = typeof amount === "number" ? amount : parseFloat(String(amount ?? "0"));
+  const curr = currencyCode || "DOP";
+  const symbol = getCurrencySymbol(curr);
+  
+  if (isNaN(numeric)) {
+    return `${symbol} 0.00`;
+  }
+
   const formatted = Math.abs(numeric).toLocaleString("es-DO", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  const prefix = numeric < 0 ? "-" : "";
+
+  const prefix = numeric < 0 ? "-" : options?.showPlusSign && numeric > 0 ? "+" : "";
   return `${prefix}${symbol} ${formatted}`;
 }

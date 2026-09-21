@@ -180,7 +180,7 @@ const accountSchema = z.object({
   name: z.string().min(1).max(80),
   type: z.enum(["checking", "savings", "credit", "cash"]),
   balance: z.coerce.number().default(0),
-  currency: z.string().length(3).default("USD"),
+  currency: z.string().length(3).default("DOP"),
   creditLimit: z.coerce.number().optional(),
   statementDay: z.coerce.number().min(1).max(31).optional(),
   paymentDueDay: z.coerce.number().min(1).max(31).optional(),

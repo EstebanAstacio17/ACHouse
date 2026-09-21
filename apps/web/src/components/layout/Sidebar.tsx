@@ -18,7 +18,7 @@ import {
   LogOut,
   User,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { useToast } from "@/components/ui/ToastContext";
 
 const navSections = [
@@ -48,6 +48,89 @@ const navSections = [
   },
 ];
 
+const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+const hasValidClerkKey =
+  Boolean(pubKey) &&
+  (pubKey.startsWith("pk_test_") || pubKey.startsWith("pk_live_")) &&
+  !pubKey.includes("REEMPLAZAR") &&
+  pubKey.length > 20;
+
+function ClerkSignOutButton({ onClose }: { onClose?: () => void }) {
+  const { signOut } = useClerk();
+  const toast = useToast();
+
+  const handleSignOut = async () => {
+    try {
+      toast.info("Cerrando sesión de ACHouse...");
+      document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+      try {
+        sessionStorage.clear();
+        localStorage.removeItem("achouse_invite_token");
+      } catch {}
+      if (onClose) onClose();
+      await signOut({ redirectUrl: "/sign-in" });
+      window.location.href = "/sign-in";
+    } catch {
+      window.location.href = "/sign-in";
+    }
+  };
+
+  return (
+    <button
+      onClick={handleSignOut}
+      className="nav-item"
+      style={{
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+        color: "var(--color-expense)",
+      }}
+      title="Cerrar Sesión"
+    >
+      <LogOut size={16} strokeWidth={2} />
+      <span style={{ flex: 1, letterSpacing: "-0.01em", fontWeight: 600 }}>Cerrar Sesión</span>
+    </button>
+  );
+}
+
+function FallbackSignOutButton({ onClose }: { onClose?: () => void }) {
+  const toast = useToast();
+
+  const handleSignOut = () => {
+    toast.info("Cerrando sesión de ACHouse...");
+    document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+    try {
+      sessionStorage.clear();
+      localStorage.removeItem("achouse_invite_token");
+    } catch {}
+    if (onClose) onClose();
+    setTimeout(() => {
+      window.location.href = "/sign-in";
+    }, 300);
+  };
+
+  return (
+    <button
+      onClick={handleSignOut}
+      className="nav-item"
+      style={{
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+        color: "var(--color-expense)",
+      }}
+      title="Cerrar Sesión"
+    >
+      <LogOut size={16} strokeWidth={2} />
+      <span style={{ flex: 1, letterSpacing: "-0.01em", fontWeight: 600 }}>Cerrar Sesión</span>
+    </button>
+  );
+}
+
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -55,18 +138,6 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const toast = useToast();
-
-  const handleSignOut = () => {
-    toast.info("Cerrando sesión de ACHouse...");
-    document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
-    if (onClose) onClose();
-    setTimeout(() => {
-      router.push("/sign-in");
-      router.refresh();
-    }, 350);
-  };
 
   return (
     <>
@@ -165,22 +236,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <span style={{ flex: 1, letterSpacing: "-0.01em" }}>Configuración</span>
           </Link>
 
-          <button
-            onClick={handleSignOut}
-            className="nav-item"
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              textAlign: "left",
-              width: "100%",
-              color: "var(--color-expense)",
-            }}
-            title="Cerrar Sesión"
-          >
-            <LogOut size={16} strokeWidth={2} />
-            <span style={{ flex: 1, letterSpacing: "-0.01em", fontWeight: 600 }}>Cerrar Sesión</span>
-          </button>
+          {hasValidClerkKey ? (
+            <ClerkSignOutButton onClose={onClose} />
+          ) : (
+            <FallbackSignOutButton onClose={onClose} />
+          )}
         </div>
       </aside>
     </>

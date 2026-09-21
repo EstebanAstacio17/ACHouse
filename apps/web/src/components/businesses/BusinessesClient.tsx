@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getBusinesses, createBusiness, updateBusiness, deleteBusiness } from "@/lib/actions/businesses-projects-loans";
+import { formatMoney } from "@/lib/geo";
 
 export interface BusinessItem {
   id: string;
@@ -161,12 +162,8 @@ export function BusinessesClient() {
     fetchBusinesses();
   }, []);
 
-  const fmt = (n: number, currency = "DOP") => {
-    try {
-      return n.toLocaleString("es-DO", { style: "currency", currency });
-    } catch {
-      return `${currency} ${n.toFixed(2)}`;
-    }
+  const fmt = (n: number | string, currency = "DOP") => {
+    return formatMoney(n, currency);
   };
 
   const totalRevenue = businesses.reduce((sum, b) => sum + b.income, 0);

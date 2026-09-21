@@ -11,6 +11,7 @@ import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
 import { getProjects, createProject, updateProject, deleteProject, getBusinesses } from "@/lib/actions/businesses-projects-loans";
 import { getMembers } from "@/lib/actions/entities";
+import { formatMoney } from "@/lib/geo";
 
 const STATUS_CONFIG = {
   active: { label: "Activo", color: "var(--color-income)", bg: "var(--color-income-dim)" },
@@ -194,7 +195,7 @@ function CloseProjectModal({
 }) {
   const variance = project.budget - project.spent;
   const isUnder = variance >= 0;
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: project.currency });
+  const fmt = (n: number | string) => formatMoney(n, project.currency || "DOP");
 
   return (
     <div
@@ -271,7 +272,7 @@ export function ProjectsClient() {
           description: p.description ?? "",
           budget: parseFloat(p.budget ?? "0"),
           spent: 0,
-          currency: p.currency ?? "USD",
+          currency: p.currency ?? "DOP",
           status: p.status as any,
           startDate: new Date(p.startDate),
           endDate: p.endDate ? new Date(p.endDate) : null,
@@ -293,7 +294,7 @@ export function ProjectsClient() {
     loadData();
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number | string, currency = "DOP") => formatMoney(n, currency);
 
   const totalBudget = projects.reduce((sum, p) => sum + p.budget, 0);
   const totalSpent = projects.reduce((sum, p) => sum + p.spent, 0);

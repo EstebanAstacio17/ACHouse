@@ -242,7 +242,7 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
         projectId: parsed.projectId ?? null,
         type: parsed.type,
         amount: parsed.amount.toString(),
-        currency: parsed.currency || account.currency || "DOP",
+        currency: data.currency || account.currency || parsed.currency || "DOP",
         description: parsed.description,
         date: new Date(parsed.date),
         referenceNo: parsed.referenceNo ?? null,

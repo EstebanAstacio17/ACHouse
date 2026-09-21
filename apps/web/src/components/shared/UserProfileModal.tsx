@@ -80,12 +80,14 @@ export function UserProfileModal({
     if (onSignOut) {
       onSignOut();
     } else {
-      // Clear session cookie and redirect
       document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+      try {
+        sessionStorage.clear();
+        localStorage.removeItem("achouse_invite_token");
+      } catch {}
       setTimeout(() => {
-        router.push("/sign-in");
-        router.refresh();
-      }, 400);
+        window.location.href = "/sign-in";
+      }, 300);
     }
   };
 

@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { getLoans, createLoan, registerLoanPayment, deleteLoan } from "@/lib/actions/businesses-projects-loans";
 import { getAccounts, createAccount, deleteAccount, updateAccount, getMembers } from "@/lib/actions/entities";
 import { createTransaction } from "@/lib/actions/transactions";
+import { formatMoney } from "@/lib/geo";
 
 // ─── Types & Demo Data ─────────────────────────────────────────────────────────
 export interface LoanItem {
@@ -400,7 +401,7 @@ function PayLoanModal({
               <label className="label">Cuenta de débito</label>
               <select className="input" value={accountId} onChange={e => setAccountId(e.target.value)}>
                 {accounts.map(a => (
-                  <option key={a.id} value={a.id}>{a.name} (Saldo: ${a.balance.toLocaleString()})</option>
+                  <option key={a.id} value={a.id}>{a.name} (Saldo: {formatMoney(a.balance, a.currency || loan.currency || "DOP")})</option>
                 ))}
               </select>
             </div>
@@ -416,7 +417,7 @@ function PayLoanModal({
               />
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-              Saldo actual adeudado: <strong>${loan.remainingBalance.toLocaleString()}</strong>.
+              Saldo actual adeudado: <strong>{formatMoney(loan.remainingBalance, loan.currency || "DOP")}</strong>.
               Este pago se descontará de la deuda y generará automáticamente un egreso en la cuenta seleccionada.
             </p>
           </div>
@@ -468,7 +469,7 @@ function PayCardModal({
               <label className="label">Cuenta de origen</label>
               <select className="input" value={accountId} onChange={e => setAccountId(e.target.value)}>
                 {accounts.map(a => (
-                  <option key={a.id} value={a.id}>{a.name} (Saldo: ${a.balance.toLocaleString()})</option>
+                  <option key={a.id} value={a.id}>{a.name} (Saldo: {formatMoney(a.balance, a.currency || card.currency || "DOP")})</option>
                 ))}
               </select>
             </div>
@@ -482,7 +483,7 @@ function PayCardModal({
                   className={`btn btn-sm ${payType === "total" ? "btn-primary" : "btn-secondary"}`}
                   style={{ fontSize: "0.75rem" }}
                 >
-                  Saldo al corte (${card.balance.toFixed(2)})
+                  Saldo al corte ({formatMoney(card.balance, card.currency || "DOP")})
                 </button>
                 <button
                   type="button"
@@ -490,7 +491,7 @@ function PayCardModal({
                   className={`btn btn-sm ${payType === "minimum" ? "btn-primary" : "btn-secondary"}`}
                   style={{ fontSize: "0.75rem" }}
                 >
-                  Mínimo (${card.minimumPayment.toFixed(2)})
+                  Mínimo ({formatMoney(card.minimumPayment, card.currency || "DOP")})
                 </button>
                 <button
                   type="button"
@@ -521,7 +522,7 @@ function PayCardModal({
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn btn-primary">
-              <Check size={15} /> Pagar ${finalAmount.toFixed(2)}
+              <Check size={15} /> Pagar {formatMoney(finalAmount, card.currency || "DOP")}
             </button>
           </div>
         </form>
@@ -569,7 +570,7 @@ function AmortizationTableModal({
           <div>
             <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Tabla de Amortización: {loan.name}</h2>
             <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-              Principal: ${loan.principalAmount.toLocaleString()} · Tasa: {loan.interestRate}% anual
+              Principal: {formatMoney(loan.principalAmount, loan.currency || "DOP")} · Tasa: {loan.interestRate}% anual
             </p>
           </div>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
@@ -695,12 +696,8 @@ export function LoansClient() {
     loadData();
   }, []);
 
-  const fmt = (n: number, currency = "DOP") => {
-    try {
-      return n.toLocaleString("es-DO", { style: "currency", currency });
-    } catch {
-      return `${currency} ${n.toFixed(2)}`;
-    }
+  const fmt = (n: number | string, currency = "DOP") => {
+    return formatMoney(n, currency);
   };
 
   const totalLoanDebt = loans.reduce((sum, l) => sum + l.remainingBalance, 0);

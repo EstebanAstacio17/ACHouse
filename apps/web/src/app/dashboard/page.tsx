@@ -10,6 +10,7 @@ import { CategoryDonutChart }  from "@/components/charts/CategoryDonutChart";
 import { getAccounts } from "@/lib/actions/entities";
 import { getTransactions } from "@/lib/actions/transactions";
 import { getActiveHousehold } from "@/lib/household";
+import { formatMoney } from "@/lib/geo";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -70,12 +71,8 @@ export default async function DashboardPage() {
 
   const netFlow = monthIncome - monthExpense;
 
-  const fmtCurrency = (n: number, curr = defaultCurrency) => {
-    try {
-      return n.toLocaleString("es-DO", { style: "currency", currency: curr });
-    } catch {
-      return `${curr} ${n.toFixed(2)}`;
-    }
+  const fmtCurrency = (n: number | string, curr = defaultCurrency) => {
+    return formatMoney(n, curr);
   };
 
   const kpis = [

@@ -1,6 +1,7 @@
 "use client";
 
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
+import { formatMoney } from "@/lib/geo";
 
 const CATEGORY_DATA: Array<{ name: string; value: number; color: string }> = [];
 
@@ -24,7 +25,7 @@ const CustomTooltip = ({ active, payload }: any) => {
           {data.name}
         </p>
         <p style={{ fontSize: "0.8125rem", color: "var(--text-primary)", marginTop: "0.125rem" }}>
-          ${data.value.toLocaleString()} ({pct}%)
+          {formatMoney(data.value, "DOP")} ({pct}%)
         </p>
       </div>
     );

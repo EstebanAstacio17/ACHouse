@@ -116,7 +116,7 @@ export const transactionSchema = z.object({
   projectId: z.string().optional(),
   type: z.enum(["income", "expense", "transfer"]),
   amount: z.coerce.number().positive(),
-  currency: z.string().length(3).default("USD"),
+  currency: z.string().length(3).default("DOP"),
   description: z.string().min(1).max(255),
   date: z.string(),
   referenceNo: z.string().optional(),

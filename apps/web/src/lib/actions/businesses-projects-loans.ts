@@ -269,7 +269,7 @@ export async function createProject(data: {
     name: data.name,
     description: data.description ?? null,
     budget: data.budget?.toString() ?? null,
-    currency: data.currency ?? "USD",
+    currency: data.currency ?? "DOP",
     startDate: new Date(data.startDate),
     endDate: data.endDate ? new Date(data.endDate) : null,
     memberId: data.memberId ?? null,
@@ -333,7 +333,7 @@ export async function createLoan(data: {
     monthlyPayment: data.monthlyPayment?.toString() ?? null,
     startDate: new Date(data.startDate),
     endDate: data.endDate ? new Date(data.endDate) : null,
-    currency: data.currency ?? "USD",
+    currency: data.currency ?? "DOP",
     accountId: data.accountId ?? null,
   }).returning();
   revalidatePath("/dashboard/loans");

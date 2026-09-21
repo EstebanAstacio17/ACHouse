@@ -117,9 +117,14 @@ function ClerkConnectedAvatar() {
     try {
       toast.info("Cerrando sesión...");
       document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+      try {
+        sessionStorage.clear();
+        localStorage.removeItem("achouse_invite_token");
+      } catch {}
       await signOut({ redirectUrl: "/sign-in" });
+      window.location.href = "/sign-in";
     } catch {
-      router.push("/sign-in");
+      window.location.href = "/sign-in";
     }
   };
 
@@ -406,10 +411,13 @@ function CustomUserDropdown({ fallbackMode = false }: { fallbackMode?: boolean }
   const handleSignOut = () => {
     toast.info("Cerrando sesión de ACHouse...");
     document.cookie = "household_id=; path=/; max-age=0; SameSite=Lax";
+    try {
+      sessionStorage.clear();
+      localStorage.removeItem("achouse_invite_token");
+    } catch {}
     setTimeout(() => {
-      router.push("/sign-in");
-      router.refresh();
-    }, 400);
+      window.location.href = "/sign-in";
+    }, 300);
   };
 
   return (

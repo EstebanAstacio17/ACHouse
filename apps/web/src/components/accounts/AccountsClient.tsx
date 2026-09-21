@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check, TrendingUp, TrendingDown, AlertCircle, ShieldCheck } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getAccounts, createAccount, updateAccount, deleteAccount } from "@/lib/actions/entities";
-import { CURRENCIES } from "@/lib/geo";
+import { CURRENCIES, formatMoney } from "@/lib/geo";
 
 export interface AccountItem {
   id: string;
@@ -248,12 +248,7 @@ export function AccountsClient() {
   }, []);
 
   const fmt = (n: number | string, currency = "DOP") => {
-    try {
-      const num = parseFloat(String(n)) || 0;
-      return num.toLocaleString("es-DO", { style: "currency", currency });
-    } catch {
-      return `${currency} ${parseFloat(String(n) || "0").toFixed(2)}`;
-    }
+    return formatMoney(n, currency);
   };
 
   const totalAssets = accounts

@@ -12,6 +12,8 @@ import {
   CartesianGrid,
 } from "recharts";
 
+import { formatMoney } from "@/lib/geo";
+
 const MONTHLY_DATA: Array<{ month: string; ingresos: number; egresos: number; flujo: number }> = [];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -44,7 +46,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
           >
             <span>{entry.name}:</span>
             <span style={{ fontWeight: 700 }}>
-              ${Number(entry.value).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              {formatMoney(entry.value, "DOP")}
             </span>
           </div>
         ))}

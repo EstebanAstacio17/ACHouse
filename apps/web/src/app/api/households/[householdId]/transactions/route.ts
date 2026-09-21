@@ -15,7 +15,7 @@ const transactionSchema = z.object({
   projectId: z.string().nullable().optional(),
   type: z.enum(["income", "expense", "transfer"]),
   amount: z.string().min(1, "El monto es obligatorio"),
-  currency: z.string().default("USD"),
+  currency: z.string().default("DOP"),
   description: z.string().min(1, "La descripción es obligatoria"),
   date: z.string(), // ISO string
   referenceNo: z.string().nullable().optional(),

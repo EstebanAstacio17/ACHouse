@@ -18,6 +18,7 @@ import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
 import { getTransactions } from "@/lib/actions/transactions";
 import { getAccounts } from "@/lib/actions/entities";
+import { formatMoney } from "@/lib/geo";
 
 const PAST_RECONCILIATIONS: Array<{ id: string; accountName: string; date: Date; expected: number; actual: number; diff: number; status: string }> = [];
 
@@ -79,12 +80,8 @@ export function ReportsClient() {
   const reconDifference = parseFloat(statementBalance || "0") - activeReconAccount.expectedBalance;
   const isMatched = Math.abs(reconDifference) < 0.01;
 
-  const fmt = (n: number, curr = reportCurrency) => {
-    try {
-      return n.toLocaleString("es-DO", { style: "currency", currency: curr });
-    } catch {
-      return `${curr} ${n.toFixed(2)}`;
-    }
+  const fmt = (n: number | string, curr = reportCurrency) => {
+    return formatMoney(n, curr);
   };
 
   const totalIncome = useMemo(() => {
@@ -250,16 +247,16 @@ export function ReportsClient() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem" }}>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Ingresos Totales</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-income)" }}>${totalIncome.toLocaleString()}</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-income)" }}>{fmt(totalIncome)}</p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Gastos Totales</p>
-              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-expense)" }}>${totalExpense.toLocaleString()}</p>
+              <p style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--color-expense)" }}>{fmt(totalExpense)}</p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Flujo Neto</p>
               <p style={{ fontSize: "1.5rem", fontWeight: 800, color: netFlow >= 0 ? "var(--color-income)" : "var(--color-expense)" }}>
-                {netFlow >= 0 ? "+" : ""}${netFlow.toLocaleString()}
+                {netFlow >= 0 ? "+" : "-"}{fmt(Math.abs(netFlow))}
               </p>
             </div>
             <div className="card" style={{ padding: "1.25rem" }}>
@@ -349,7 +346,7 @@ export function ReportsClient() {
                             <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", width: 45 }}>{c.percentage}%</span>
                           </div>
                         </td>
-                        <td style={{ textAlign: "right", fontWeight: 700 }}>${c.amount.toLocaleString()}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(c.amount)}</td>
                       </tr>
                     ))
                   )}
@@ -394,7 +391,7 @@ export function ReportsClient() {
                   <input
                     className="input"
                     disabled
-                    value={`$${activeReconAccount.expectedBalance.toLocaleString()}`}
+                    value={fmt(activeReconAccount.expectedBalance, activeReconAccount.currency || reportCurrency)}
                     style={{ background: "var(--surface-3)", color: "var(--text-muted)", fontWeight: 700 }}
                   />
                 </div>
@@ -504,10 +501,10 @@ export function ReportsClient() {
                           borderRadius: 999,
                         }}
                       >
-                        {r.status === "matched" ? "Cuadrado" : `Ajustado (${r.diff >= 0 ? "+" : ""}$${r.diff})`}
+                        {r.status === "matched" ? "Cuadrado" : `Ajustado (${r.diff >= 0 ? "+" : "-"}${fmt(Math.abs(r.diff), reportCurrency)})`}
                       </span>
                       <p style={{ fontSize: "0.8125rem", fontWeight: 700, marginTop: "0.25rem" }}>
-                        ${r.actual.toLocaleString()}
+                        {fmt(r.actual, reportCurrency)}
                       </p>
                     </div>
                   </div>

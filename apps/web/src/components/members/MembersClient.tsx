@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getMembers, updateMemberRole, inviteMember, removeMember } from "@/lib/actions/entities";
+import { formatMoney } from "@/lib/geo";
 
 const ROLE_CONFIG = {
   admin: { label: "Administrador", color: "var(--accent)", Icon: Shield, bg: "var(--accent-subtle)" },
@@ -407,7 +408,7 @@ export function MembersClient() {
     };
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number | string, currency = "DOP") => formatMoney(n, currency);
 
   const totalHouseholdIncome = members.reduce((sum, m) => sum + m.monthlyIncome, 0);
   const totalHouseholdExpenses = members.reduce((sum, m) => sum + m.monthlyExpenses, 0);
@@ -719,7 +720,7 @@ export function MembersClient() {
                             {src.name}
                           </span>
                           <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--color-income)" }}>
-                            {parseFloat(src.expectedMonthlyAmount).toLocaleString("en-US", { style: "currency", currency: src.currency || "USD" })}
+                            {formatMoney(src.expectedMonthlyAmount, src.currency || "DOP")}
                           </span>
                           <button
                             className="btn btn-ghost btn-icon btn-sm"
