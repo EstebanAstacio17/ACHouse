@@ -2,11 +2,12 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { businesses, businessTransactions, projects, projectTransactions, loans, loanPayments } from "@achouse/db/schema";
+import { businesses, businessTransactions, projects, projectTransactions, loans, loanPayments, transactions } from "@achouse/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getActiveHouseholdId } from "@/lib/household";
+import { createId } from "@paralleldrive/cuid2";
 
 async function getAuthContext() {
   const { userId } = await auth();
@@ -19,16 +20,61 @@ async function getAuthContext() {
 
 export async function getBusinesses() {
   const { householdId } = await getAuthContext();
-  return db.query.businesses.findMany({
-    where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
-    orderBy: (b, { asc }) => [asc(b.name)],
-    with: { transactions: true },
+  const [bizList, txs] = await Promise.all([
+    db.query.businesses.findMany({
+      where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
+      orderBy: (b, { asc }) => [asc(b.name)],
+    }),
+    db.query.transactions.findMany({
+      where: and(
+        eq(transactions.householdId, householdId),
+        isNull(transactions.deletedAt)
+      ),
+    }),
+  ]);
+
+  const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+  return bizList.map((b) => {
+    const bTxs = txs.filter((t) => t.businessId === b.id);
+    const income = bTxs
+      .filter((t) => t.type === "income")
+      .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+    const expenses = bTxs
+      .filter((t) => t.type === "expense")
+      .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+    const net = income - expenses;
+
+    const monthlyMap = new Map<string, { month: string; income: number; expenses: number }>();
+    bTxs.forEach((t) => {
+      const d = new Date(t.date);
+      const mKey = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(-2)}`;
+      const cur = monthlyMap.get(mKey) ?? { month: mKey, income: 0, expenses: 0 };
+      const amt = parseFloat(t.amount || "0");
+      if (t.type === "income") cur.income += amt;
+      else if (t.type === "expense") cur.expenses += amt;
+      monthlyMap.set(mKey, cur);
+    });
+
+    return {
+      ...b,
+      income,
+      expenses,
+      net,
+      transactions: bTxs.length,
+      monthlyData: Array.from(monthlyMap.values()),
+    };
   });
 }
 
 export async function createBusiness(data: { name: string; description?: string; type?: string; currency?: string }) {
   const { householdId } = await getAuthContext();
-  const [biz] = await db.insert(businesses).values({ householdId, ...data, currency: data.currency ?? "USD" }).returning();
+  const [biz] = await db.insert(businesses).values({
+    id: createId(),
+    householdId,
+    ...data,
+    currency: data.currency ?? "DOP",
+  }).returning();
   revalidatePath("/dashboard/businesses");
   return { success: true, business: biz };
 }
@@ -48,13 +94,13 @@ export async function deleteBusiness(id: string) {
 }
 
 export async function getBusinessPL(businessId: string) {
-  const txs = await db.query.businessTransactions.findMany({
-    where: and(eq(businessTransactions.businessId, businessId), isNull(businessTransactions.deletedAt)),
-    orderBy: [desc(businessTransactions.date)],
-    with: { category: true },
+  const txs = await db.query.transactions.findMany({
+    where: and(eq(transactions.businessId, businessId), isNull(transactions.deletedAt)),
+    orderBy: [desc(transactions.date)],
+    with: { category: true, member: true, account: true },
   });
-  const income = txs.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount), 0);
-  const expenses = txs.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount), 0);
+  const income = txs.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+  const expenses = txs.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
   return { income, expenses, net: income - expenses, transactions: txs };
 }
 

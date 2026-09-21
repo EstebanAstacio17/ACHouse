@@ -5,7 +5,7 @@ import {
   Plus, Search, Filter, Download, ArrowUpCircle, ArrowDownCircle,
   ArrowLeftRight, Pencil, Trash2, ChevronLeft, ChevronRight,
   X, Check, Calendar, CreditCard, Tag, User, Paperclip, Repeat,
-  FileSpreadsheet, Eye, AlertCircle
+  FileSpreadsheet, Eye, AlertCircle, Building2
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -14,6 +14,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { useUser } from "@clerk/nextjs";
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "@/lib/actions/transactions";
 import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
+import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
 
 // ─── Initial / Demo Data ───────────────────────────────────────────────────────
 export interface TransactionItem {
@@ -23,6 +24,7 @@ export interface TransactionItem {
   account: { id?: string; name: string };
   toAccount?: { id?: string; name: string } | null;
   member: { id?: string; displayName: string } | null;
+  business?: { id?: string; name: string } | null;
   type: "income" | "expense" | "transfer";
   amount: string;
   currency: string;
@@ -81,6 +83,7 @@ function TransactionModal({
   categoriesList = [],
   accountsList = [],
   membersList = [],
+  businessesList = [],
   currentMemberId,
 }: {
   onClose: () => void;
@@ -89,6 +92,7 @@ function TransactionModal({
   categoriesList: Array<{ id: string; name: string; color?: string; type?: "income" | "expense" }>;
   accountsList: Array<{ id: string; name: string; currency?: string }>;
   membersList: Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>;
+  businessesList?: Array<{ id: string; name: string; type?: string }>;
   currentMemberId?: string;
 }) {
   const normalizeType = (t?: string | null) => {
@@ -129,6 +133,7 @@ function TransactionModal({
     accountId: initialData?.account?.id || (accountsList.find(a => a.name === initialData?.account?.name)?.id ?? (accountsList[0]?.id || "")),
     toAccountId: initialData?.toAccount?.id || (accountsList[1]?.id || ""),
     memberId: initialMemberId,
+    businessId: initialData?.business?.id || "",
     status: initialData?.status ?? "cleared",
     isRecurring: initialData?.isRecurring ?? false,
     recurringFrequency: initialData?.recurringFrequency ?? "Mensual",
@@ -203,6 +208,7 @@ function TransactionModal({
     const selectedAcc = accountsList.find(a => a.id === form.accountId) || accountsList[0];
     const selectedToAcc = accountsList.find(a => a.id === form.toAccountId);
     const selectedMem = membersList.find(m => m.id === form.memberId) || (membersList.length > 0 ? membersList[0] : null);
+    const selectedBiz = businessesList.find(b => b.id === form.businessId);
 
     onSave({
       id: initialData?.id,
@@ -216,6 +222,7 @@ function TransactionModal({
       account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : { name: "Principal" },
       toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
       member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
+      business: selectedBiz ? { id: selectedBiz.id, name: selectedBiz.name } : null,
       isRecurring: form.isRecurring,
       recurringFrequency: form.isRecurring ? form.recurringFrequency : undefined,
       attachmentUrl: form.attachmentUrl || null,
@@ -361,27 +368,49 @@ function TransactionModal({
               )}
             </div>
 
-            {/* Member */}
-            <div className="form-group">
-              <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
-              <select
-                className="input"
-                value={form.memberId}
-                onChange={e => {
-                  setMemberManuallySelected(true);
-                  set("memberId", e.target.value);
-                }}
-              >
-                {membersList.length === 0 ? (
-                  <option value="">Cargando integrantes del hogar...</option>
-                ) : (
-                  membersList.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              {/* Member */}
+              <div className="form-group">
+                <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
+                <select
+                  className="input"
+                  value={form.memberId}
+                  onChange={e => {
+                    setMemberManuallySelected(true);
+                    set("memberId", e.target.value);
+                  }}
+                >
+                  {membersList.length === 0 ? (
+                    <option value="">Cargando integrantes del hogar...</option>
+                  ) : (
+                    membersList.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Business / Empresa */}
+              <div className="form-group">
+                <label className="label">
+                  <Building2 size={12} style={{ display: "inline", marginRight: 4 }} />
+                  Empresa / Negocio (Opcional)
+                </label>
+                <select
+                  className="input"
+                  value={form.businessId}
+                  onChange={e => set("businessId", e.target.value)}
+                >
+                  <option value="">(Ninguno - Finanzas Hogar)</option>
+                  {businessesList.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.type ? `(${b.type})` : ""}
                     </option>
-                  ))
-                )}
-              </select>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Recurring Section */}
@@ -448,6 +477,7 @@ export function TransactionsClient() {
   const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string; type?: "income" | "expense" }>>([]);
   const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>>([]);
+  const [businessesList, setBusinessesList] = useState<Array<{ id: string; name: string; type?: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
@@ -455,6 +485,7 @@ export function TransactionsClient() {
   const [filterType, setFilterType] = useState("all");
   const [filterAccount, setFilterAccount] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [filterBusiness, setFilterBusiness] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [datePreset, setDatePreset] = useState<"all" | "thisMonth" | "today">("all");
   const [page, setPage] = useState(1);
@@ -502,13 +533,17 @@ export function TransactionsClient() {
       getAccounts(),
       getCategories(),
       getMembers(),
-    ]).then(([txs, accs, cats, mems]) => {
+      getBusinesses(),
+    ]).then(([txs, accs, cats, mems, bizs]) => {
       if (!active) return;
       if (accs) {
         setAccountsList(accs.map((a: any) => ({ id: a.id, name: a.name, currency: a.currency })));
       }
       if (cats) {
         setCategoriesList(cats.map((c: any) => ({ id: c.id, name: c.name, color: c.color, type: c.type })));
+      }
+      if (bizs) {
+        setBusinessesList(bizs.map((b: any) => ({ id: b.id, name: b.name, type: b.type })));
       }
       if (mems) {
         const resolved = getResolvedUserName();
@@ -541,6 +576,7 @@ export function TransactionsClient() {
             account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
             toAccount: t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null,
             member: t.member ? { id: t.member.id, displayName: formatMemberName(t.member.displayName) } : null,
+            business: t.business ? { id: t.business.id, name: t.business.name } : null,
             isRecurring: t.isRecurring,
             notes: t.notes,
           }))
@@ -579,11 +615,16 @@ export function TransactionsClient() {
       const matchSearch = !search ||
         tx.description.toLowerCase().includes(search.toLowerCase()) ||
         (tx.category?.name && tx.category.name.toLowerCase().includes(search.toLowerCase())) ||
+        (tx.business?.name && tx.business.name.toLowerCase().includes(search.toLowerCase())) ||
         tx.account.name.toLowerCase().includes(search.toLowerCase());
 
       const matchType = filterType === "all" || tx.type === filterType;
       const matchAccount = filterAccount === "all" || tx.account.name === filterAccount;
       const matchCategory = filterCategory === "all" || (tx.category && tx.category.name === filterCategory);
+      const matchBusiness =
+        filterBusiness === "all" ||
+        (filterBusiness === "none" && !tx.business) ||
+        (tx.business && tx.business.id === filterBusiness);
       const matchStatus = filterStatus === "all" || tx.status === filterStatus;
 
       let matchDate = true;
@@ -596,9 +637,9 @@ export function TransactionsClient() {
         matchDate = tx.date.getMonth() === currentMonth && tx.date.getFullYear() === currentYear;
       }
 
-      return matchSearch && matchType && matchAccount && matchCategory && matchStatus && matchDate;
+      return matchSearch && matchType && matchAccount && matchCategory && matchBusiness && matchStatus && matchDate;
     });
-  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterStatus, datePreset]);
+  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterBusiness, filterStatus, datePreset]);
 
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
@@ -627,6 +668,7 @@ export function TransactionsClient() {
           categoryId: saved.category?.id || undefined,
           accountId: saved.account?.id || undefined,
           memberId: saved.member?.id || undefined,
+          businessId: saved.business?.id || undefined,
           date: saved.date ? saved.date.toISOString() : undefined,
         });
         if (res && !res.success) {
@@ -644,6 +686,7 @@ export function TransactionsClient() {
           toAccountId: saved.toAccount?.id || undefined,
           categoryId: saved.category?.id || undefined,
           memberId: saved.member?.id || undefined,
+          businessId: saved.business?.id || undefined,
           date: saved.date ? saved.date.toISOString() : new Date().toISOString(),
           status: saved.status || "cleared",
           isRecurring: Boolean(saved.isRecurring),
@@ -665,6 +708,7 @@ export function TransactionsClient() {
           account: saved.account || { name: "Principal" },
           toAccount: saved.toAccount || null,
           member: saved.member || null,
+          business: saved.business || null,
           isRecurring: created.isRecurring,
           notes: saved.notes || undefined,
         };
@@ -694,6 +738,7 @@ export function TransactionsClient() {
       Fecha: format(t.date, "yyyy-MM-dd"),
       Tipo: t.type === "income" ? "Ingreso" : t.type === "expense" ? "Egreso" : "Transferencia",
       Descripción: t.description,
+      "Empresa / Negocio": t.business?.name || "Hogar / Personal",
       Categoría: t.category?.name || "N/A",
       Cuenta: t.account.name,
       "Cuenta Destino": t.toAccount?.name || "N/A",
@@ -721,6 +766,7 @@ export function TransactionsClient() {
           categoriesList={categoriesList}
           accountsList={accountsList}
           membersList={membersList}
+          businessesList={businessesList}
           currentMemberId={currentMemberId}
         />
       )}
@@ -836,6 +882,25 @@ export function TransactionsClient() {
               </button>
             ))}
           </div>
+
+          {/* Business Filter */}
+          {businessesList.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+              <Building2 size={14} style={{ color: "var(--text-muted)" }} />
+              <select
+                className="input"
+                style={{ width: "auto", fontSize: "0.75rem", padding: "0.35rem 0.6rem" }}
+                value={filterBusiness}
+                onChange={e => { setFilterBusiness(e.target.value); setPage(1); }}
+              >
+                <option value="all">Todas las empresas / hogar</option>
+                <option value="none">Solo Hogar / Personal</option>
+                {businessesList.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Table or Empty State */}
@@ -885,7 +950,23 @@ export function TransactionsClient() {
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.125rem" }}>
                           <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>{tx.description}</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                            {tx.business && (
+                              <span style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                fontSize: "0.6875rem",
+                                background: "var(--color-investment-dim)",
+                                color: "var(--color-investment)",
+                                border: "1px solid var(--border-subtle)",
+                                padding: "0.1rem 0.4rem",
+                                borderRadius: 4,
+                                fontWeight: 600
+                              }}>
+                                <Building2 size={10} /> {tx.business.name}
+                              </span>
+                            )}
                             {tx.isRecurring && (
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: "0.6875rem", color: "var(--color-brand-300)" }}>
                                 <Repeat size={10} /> {tx.recurringFrequency || "Recurrente"}

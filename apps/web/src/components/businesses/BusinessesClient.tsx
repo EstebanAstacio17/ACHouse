@@ -6,7 +6,7 @@ import {
   X, Check, ExternalLink, ArrowUpCircle, ArrowDownCircle, Percent
 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
-import { getBusinesses, createBusiness, updateBusiness } from "@/lib/actions/businesses-projects-loans";
+import { getBusinesses, createBusiness, updateBusiness, deleteBusiness } from "@/lib/actions/businesses-projects-loans";
 
 export interface BusinessItem {
   id: string;
@@ -133,34 +133,41 @@ export function BusinessesClient() {
   const [showModal, setShowModal] = useState(false);
   const [editingBiz, setEditingBiz] = useState<BusinessItem | null>(null);
 
+  const fetchBusinesses = async () => {
+    try {
+      const data = await getBusinesses();
+      if (data) {
+        setBusinesses(
+          data.map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            description: b.description || "",
+            type: b.type || "Comercio",
+            currency: b.currency || "DOP",
+            income: Number(b.income || 0),
+            expenses: Number(b.expenses || 0),
+            transactions: Number(b.transactions || 0),
+            isActive: b.isActive ?? true,
+            monthlyData: b.monthlyData || [],
+          }))
+        );
+      }
+    } catch (err) {
+      console.error("Error loading businesses:", err);
+    }
+  };
+
   useEffect(() => {
-    let active = true;
-    getBusinesses()
-      .then((data) => {
-        if (active && data) {
-          setBusinesses(
-            data.map((b: any) => ({
-              id: b.id,
-              name: b.name,
-              description: b.description || "",
-              type: b.type || "Comercio",
-              currency: b.currency || "USD",
-              income: 0,
-              expenses: 0,
-              transactions: (b.transactions || []).length,
-              isActive: b.isActive ?? true,
-              monthlyData: [],
-            }))
-          );
-        }
-      })
-      .catch((err) => console.error("Error loading businesses:", err));
-    return () => {
-      active = false;
-    };
+    fetchBusinesses();
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const fmt = (n: number, currency = "DOP") => {
+    try {
+      return n.toLocaleString("es-DO", { style: "currency", currency });
+    } catch {
+      return `${currency} ${n.toFixed(2)}`;
+    }
+  };
 
   const totalRevenue = businesses.reduce((sum, b) => sum + b.income, 0);
   const totalExpenses = businesses.reduce((sum, b) => sum + b.expenses, 0);
@@ -176,41 +183,32 @@ export function BusinessesClient() {
           type: saved.type,
           currency: saved.currency,
         });
-        setBusinesses(prev => prev.map(b => b.id === saved.id ? { ...b, ...saved } as BusinessItem : b));
         toast.success("Negocio actualizado exitosamente");
       } else {
-        const res = await createBusiness({
+        await createBusiness({
           name: saved.name!,
           description: saved.description,
           type: saved.type,
           currency: saved.currency,
         });
-        const created = res.business;
-        const newBiz: BusinessItem = {
-          id: created.id,
-          name: created.name,
-          description: created.description || "",
-          type: created.type || "Comercio",
-          currency: created.currency || "USD",
-          income: 0,
-          expenses: 0,
-          transactions: 0,
-          isActive: true,
-          monthlyData: [],
-        };
-        setBusinesses(prev => [newBiz, ...prev]);
         toast.success("Negocio registrado exitosamente");
       }
+      await fetchBusinesses();
     } catch (err: any) {
       toast.error(err?.message || "Error al guardar negocio");
     }
     setEditingBiz(null);
   };
 
-  const handleDelete = (id: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar el negocio "${name}"?`)) {
-      setBusinesses(prev => prev.filter(b => b.id !== id));
-      toast.info(`Negocio "${name}" eliminado`);
+      try {
+        await deleteBusiness(id);
+        setBusinesses(prev => prev.filter(b => b.id !== id));
+        toast.info(`Negocio "${name}" eliminado`);
+      } catch (err: any) {
+        toast.error(err?.message || "Error al eliminar el negocio");
+      }
     }
   };
 
@@ -298,9 +296,14 @@ export function BusinessesClient() {
                     </div>
                     <div>
                       <h3 style={{ fontSize: "1.0625rem", fontWeight: 700 }}>{b.name}</h3>
-                      <span className="badge badge-investment" style={{ fontSize: "0.75rem" }}>
-                        {b.type}
-                      </span>
+                      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.25rem" }}>
+                        <span className="badge badge-investment" style={{ fontSize: "0.75rem" }}>
+                          {b.type}
+                        </span>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                          • {b.transactions} {b.transactions === 1 ? "transacción" : "transacciones"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "0.25rem" }}>
@@ -335,8 +338,8 @@ export function BusinessesClient() {
                     <div style={{ flex: 1, height: 8, background: "var(--bg-hover)", borderRadius: 999, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${(b.income / max) * 100}%`, background: "var(--color-income)", borderRadius: 999 }} />
                     </div>
-                    <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--color-income)", width: 80, textAlign: "right" }}>
-                      {fmt(b.income)}
+                    <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--color-income)", width: 90, textAlign: "right" }}>
+                      {fmt(b.income, b.currency)}
                     </span>
                   </div>
 
@@ -345,8 +348,8 @@ export function BusinessesClient() {
                     <div style={{ flex: 1, height: 8, background: "var(--bg-hover)", borderRadius: 999, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${(b.expenses / max) * 100}%`, background: "var(--color-expense)", borderRadius: 999 }} />
                     </div>
-                    <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--color-expense)", width: 80, textAlign: "right" }}>
-                      {fmt(b.expenses)}
+                    <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--color-expense)", width: 90, textAlign: "right" }}>
+                      {fmt(b.expenses, b.currency)}
                     </span>
                   </div>
                 </div>
@@ -358,7 +361,7 @@ export function BusinessesClient() {
                       Ganancia Neta
                     </p>
                     <p style={{ fontSize: "1.125rem", fontWeight: 800, color: net >= 0 ? "var(--color-income)" : "var(--color-expense)" }}>
-                      {fmt(net)}
+                      {fmt(net, b.currency)}
                     </p>
                   </div>
                   <div style={{ padding: "0.75rem", background: "var(--bg-card-alt)", borderRadius: "var(--radius-md)", textAlign: "center" }}>

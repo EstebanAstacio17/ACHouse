@@ -71,6 +71,7 @@ export async function getTransactions(filters?: {
   categoryId?: string;
   memberId?: string;
   accountId?: string;
+  businessId?: string;
   search?: string;
   page?: number;
   perPage?: number;
@@ -107,6 +108,9 @@ export async function getTransactions(filters?: {
   if (filters?.accountId) {
     conditions.push(eq(transactions.accountId, filters.accountId));
   }
+  if (filters?.businessId) {
+    conditions.push(eq(transactions.businessId, filters.businessId));
+  }
   if (filters?.search) {
     conditions.push(ilike(transactions.description, `%${filters.search}%`));
   }
@@ -120,6 +124,7 @@ export async function getTransactions(filters?: {
       category: true,
       account: true,
       member: true,
+      business: true,
     },
   });
 
@@ -248,6 +253,7 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
     try {
       revalidatePath("/dashboard");
       revalidatePath("/dashboard/transactions");
+      revalidatePath("/dashboard/businesses");
     } catch (revErr) {
       console.warn("revalidatePath warning:", revErr);
     }
@@ -264,6 +270,7 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       accountId: insertedTx.accountId,
       categoryId: insertedTx.categoryId,
       memberId: insertedTx.memberId,
+      businessId: insertedTx.businessId,
       toAccountId: insertedTx.toAccountId,
     };
 
@@ -299,8 +306,13 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
       })
       .where(eq(transactions.id, id));
 
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/transactions");
+    try {
+      revalidatePath("/dashboard");
+      revalidatePath("/dashboard/transactions");
+      revalidatePath("/dashboard/businesses");
+    } catch (revErr) {
+      console.warn("revalidatePath warning:", revErr);
+    }
     return { success: true };
   } catch (err: any) {
     console.error("Error in updateTransaction:", err);
@@ -321,8 +333,13 @@ export async function deleteTransaction(id: string) {
       .set({ deletedAt: new Date() })
       .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)));
 
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/transactions");
+    try {
+      revalidatePath("/dashboard");
+      revalidatePath("/dashboard/transactions");
+      revalidatePath("/dashboard/businesses");
+    } catch (revErr) {
+      console.warn("revalidatePath warning:", revErr);
+    }
     return { success: true };
   } catch (err: any) {
     console.error("Error in deleteTransaction:", err);
