@@ -53,7 +53,10 @@ export async function getBusinesses() {
 
     // Any transaction explicitly linked to businessId OR whose category matches the business
     const bTxs = txs.filter(
-      (t) => t.businessId === b.id || (t.categoryId && bizCategoryIds.has(t.categoryId))
+      (t) =>
+        t.businessId === b.id ||
+        (t.categoryId && bizCategoryIds.has(t.categoryId)) ||
+        (t.category?.name && t.category.name.toLowerCase().trim() === b.name.toLowerCase().trim())
     );
 
     const isIncomeTx = (t: (typeof txs)[0]) =>
@@ -227,7 +230,10 @@ export async function getBusinessPL(businessId: string) {
     : new Set<string>();
 
   const bTxs = txs.filter(
-    (t) => t.businessId === businessId || (t.categoryId && bizCategoryIds.has(t.categoryId))
+    (t) =>
+      t.businessId === businessId ||
+      (t.categoryId && bizCategoryIds.has(t.categoryId)) ||
+      (biz && t.category?.name && t.category.name.toLowerCase().trim() === biz.name.toLowerCase().trim())
   );
 
   const isIncomeTx = (t: (typeof txs)[0]) =>

@@ -64,20 +64,29 @@ export async function syncBusinessCategories(householdId: string) {
         where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt), eq(businesses.isActive, true)),
       }),
       db.query.categories.findMany({
-        where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+        where: eq(categories.householdId, householdId),
       }),
     ]);
 
     for (const biz of bizList) {
-      // 1. Check/create Income category for business
-      const hasIncome = existingCats.some(
-        c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === "income"
+      const cleanName = biz.name.trim();
+
+      // 1. Check/create/restore Income category for business
+      const existingIncome = existingCats.find(
+        c => c.name.toLowerCase().trim() === cleanName.toLowerCase() && c.type === "income"
       );
-      if (!hasIncome) {
+      if (existingIncome) {
+        if (existingIncome.deletedAt || !existingIncome.isActive || existingIncome.name !== cleanName) {
+          await db
+            .update(categories)
+            .set({ deletedAt: null, isActive: true, name: cleanName, color: "#10b981", icon: "building-2" })
+            .where(eq(categories.id, existingIncome.id));
+        }
+      } else {
         await db.insert(categories).values({
           id: createId(),
           householdId,
-          name: biz.name.trim(),
+          name: cleanName,
           type: "income",
           color: "#10b981",
           icon: "building-2",
@@ -85,15 +94,22 @@ export async function syncBusinessCategories(householdId: string) {
         });
       }
 
-      // 2. Check/create Expense category for business
-      const hasExpense = existingCats.some(
-        c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === "expense"
+      // 2. Check/create/restore Expense category for business
+      const existingExpense = existingCats.find(
+        c => c.name.toLowerCase().trim() === cleanName.toLowerCase() && c.type === "expense"
       );
-      if (!hasExpense) {
+      if (existingExpense) {
+        if (existingExpense.deletedAt || !existingExpense.isActive || existingExpense.name !== cleanName) {
+          await db
+            .update(categories)
+            .set({ deletedAt: null, isActive: true, name: cleanName, color: "#6366f1", icon: "building-2" })
+            .where(eq(categories.id, existingExpense.id));
+        }
+      } else {
         await db.insert(categories).values({
           id: createId(),
           householdId,
-          name: biz.name.trim(),
+          name: cleanName,
           type: "expense",
           color: "#6366f1",
           icon: "building-2",

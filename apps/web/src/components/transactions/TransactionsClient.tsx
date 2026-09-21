@@ -85,6 +85,7 @@ function TransactionModal({
   membersList = [],
   businessesList = [],
   currentMemberId,
+  defaultBusinessId,
 }: {
   onClose: () => void;
   onSave: (tx: Partial<TransactionItem>) => void;
@@ -94,6 +95,7 @@ function TransactionModal({
   membersList: Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>;
   businessesList?: Array<{ id: string; name: string; type?: string }>;
   currentMemberId?: string;
+  defaultBusinessId?: string;
 }) {
   const normalizeType = (t?: string | null) => {
     if (!t) return "";
@@ -107,7 +109,6 @@ function TransactionModal({
   const initialType = (initialData?.type ?? "expense") as "income" | "expense" | "transfer";
   const initialNormType = normalizeType(initialType);
   const matchingInitialCats = categoriesList.filter(c => initialNormType === "transfer" ? true : normalizeType(c.type) === initialNormType);
-  const defaultCatId = initialData?.category?.id || (matchingInitialCats.find(c => c.name === initialData?.category?.name)?.id ?? (matchingInitialCats[0]?.id || ""));
 
   const initialBusinessId = useMemo(() => {
     if (initialData?.business?.id) return initialData.business.id;
@@ -115,8 +116,25 @@ function TransactionModal({
       const match = businessesList.find(b => b.name.toLowerCase().trim() === initialData.category?.name.toLowerCase().trim());
       if (match) return match.id;
     }
+    if (defaultBusinessId) return defaultBusinessId;
     return "";
-  }, [initialData, businessesList]);
+  }, [initialData, businessesList, defaultBusinessId]);
+
+  const defaultCatId = useMemo(() => {
+    if (initialData?.category?.id) return initialData.category.id;
+    if (initialData?.category?.name) {
+      const match = matchingInitialCats.find(c => c.name.toLowerCase().trim() === initialData.category?.name.toLowerCase().trim());
+      if (match) return match.id;
+    }
+    if (initialBusinessId) {
+      const biz = businessesList.find(b => b.id === initialBusinessId);
+      if (biz) {
+        const match = matchingInitialCats.find(c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim());
+        if (match) return match.id;
+      }
+    }
+    return "";
+  }, [initialData, matchingInitialCats, initialBusinessId, businessesList]);
 
   const initialMemberId = useMemo(() => {
     if (initialData?.member?.id) return initialData.member.id;
@@ -197,6 +215,16 @@ function TransactionModal({
       const matchBiz = businessesList.find(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim());
       if (matchBiz) {
         linkedBizId = matchBiz.id;
+      } else {
+        const prevCat = categoriesList.find(c => c.id === form.categoryId);
+        if (prevCat && businessesList.some(b => b.name.toLowerCase().trim() === prevCat.name.toLowerCase().trim())) {
+          linkedBizId = "";
+        }
+      }
+    } else {
+      const prevCat = categoriesList.find(c => c.id === form.categoryId);
+      if (prevCat && businessesList.some(b => b.name.toLowerCase().trim() === prevCat.name.toLowerCase().trim())) {
+        linkedBizId = "";
       }
     }
     setForm(prev => ({
@@ -750,6 +778,19 @@ export function TransactionsClient() {
   const [page, setPage] = useState(1);
   const perPage = 8;
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const bizParam = params.get("business");
+      if (bizParam) {
+        setFilterBusiness(bizParam);
+      }
+      if (params.get("new") === "true") {
+        setShowModal(true);
+      }
+    }
+  }, []);
+
   const isRoleName = (name?: string | null) => {
     if (!name || !name.trim()) return true;
     const lower = name.trim().toLowerCase();
@@ -1044,6 +1085,7 @@ export function TransactionsClient() {
           membersList={membersList}
           businessesList={businessesList}
           currentMemberId={currentMemberId}
+          defaultBusinessId={filterBusiness !== "all" && filterBusiness !== "none" ? filterBusiness : undefined}
         />
       )}
 

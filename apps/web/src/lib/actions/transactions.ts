@@ -171,48 +171,45 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
     let categoryId: string | null = parsed.categoryId ?? null;
     let businessId: string | null = parsed.businessId ?? null;
 
+    const [householdBizs, householdCats] = await Promise.all([
+      db.query.businesses.findMany({
+        where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
+      }),
+      db.query.categories.findMany({
+        where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+      }),
+    ]);
+
     if (categoryId) {
-      const cat = await db.query.categories.findFirst({
-        where: and(
-          eq(categories.id, categoryId),
-          eq(categories.householdId, householdId),
-          isNull(categories.deletedAt)
-        ),
-      });
+      const cat = householdCats.find(c => c.id === categoryId);
       if (!cat) {
         categoryId = null;
       } else if (!businessId) {
         // If category belongs to a business, link businessId automatically
-        const matchingBiz = await db.query.businesses.findFirst({
-          where: and(
-            eq(businesses.householdId, householdId),
-            isNull(businesses.deletedAt),
-            eq(businesses.name, cat.name)
-          ),
-        });
+        const matchingBiz = householdBizs.find(
+          b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim()
+        );
         if (matchingBiz) {
           businessId = matchingBiz.id;
         }
       }
     }
 
-    if (businessId && !categoryId) {
-      // If businessId is specified without category, auto-link to the business's corresponding category
-      const biz = await db.query.businesses.findFirst({
-        where: and(eq(businesses.id, businessId), eq(businesses.householdId, householdId)),
-      });
+    if (businessId) {
+      const biz = householdBizs.find(b => b.id === businessId);
       if (biz) {
+        // If category is not set, or if category doesn't match business, find the matching business category
         const targetType = parsed.type === "income" ? "income" : "expense";
-        const matchingCat = await db.query.categories.findFirst({
-          where: and(
-            eq(categories.householdId, householdId),
-            isNull(categories.deletedAt),
-            eq(categories.name, biz.name),
-            eq(categories.type, targetType)
-          ),
-        });
-        if (matchingCat) {
-          categoryId = matchingCat.id;
+        const currentCat = categoryId ? householdCats.find(c => c.id === categoryId) : null;
+        
+        // If no category was selected or the current category is not for this business and type
+        if (!currentCat) {
+          const matchingCat = householdCats.find(
+            c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === targetType
+          );
+          if (matchingCat) {
+            categoryId = matchingCat.id;
+          }
         }
       }
     }
@@ -335,18 +332,21 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
     let categoryId = data.categoryId;
     let businessId = data.businessId;
 
+    const [householdBizs, householdCats] = await Promise.all([
+      db.query.businesses.findMany({
+        where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
+      }),
+      db.query.categories.findMany({
+        where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+      }),
+    ]);
+
     if (categoryId && businessId === undefined) {
-      const cat = await db.query.categories.findFirst({
-        where: and(eq(categories.id, categoryId), eq(categories.householdId, householdId)),
-      });
+      const cat = householdCats.find(c => c.id === categoryId);
       if (cat) {
-        const matchingBiz = await db.query.businesses.findFirst({
-          where: and(
-            eq(businesses.householdId, householdId),
-            isNull(businesses.deletedAt),
-            eq(businesses.name, cat.name)
-          ),
-        });
+        const matchingBiz = householdBizs.find(
+          b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim()
+        );
         if (matchingBiz) {
           businessId = matchingBiz.id;
         }
@@ -354,19 +354,12 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
     }
 
     if (businessId && categoryId === undefined) {
-      const biz = await db.query.businesses.findFirst({
-        where: and(eq(businesses.id, businessId), eq(businesses.householdId, householdId)),
-      });
+      const biz = householdBizs.find(b => b.id === businessId);
       if (biz) {
         const targetType = (data.type || existing.type) === "income" ? "income" : "expense";
-        const matchingCat = await db.query.categories.findFirst({
-          where: and(
-            eq(categories.householdId, householdId),
-            isNull(categories.deletedAt),
-            eq(categories.name, biz.name),
-            eq(categories.type, targetType)
-          ),
-        });
+        const matchingCat = householdCats.find(
+          c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === targetType
+        );
         if (matchingCat) {
           categoryId = matchingCat.id;
         }

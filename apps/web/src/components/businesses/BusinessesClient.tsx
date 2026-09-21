@@ -373,6 +373,24 @@ export function BusinessesClient() {
                     </p>
                   </div>
                 </div>
+
+                {/* Quick Transaction Actions */}
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
+                  <a
+                    href={`/dashboard/transactions?business=${b.id}`}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1, textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem", fontSize: "0.75rem" }}
+                  >
+                    <ExternalLink size={12} /> Ver Transacciones
+                  </a>
+                  <a
+                    href={`/dashboard/transactions?business=${b.id}&new=true`}
+                    className="btn btn-primary btn-sm"
+                    style={{ flex: 1, textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem", fontSize: "0.75rem" }}
+                  >
+                    <Plus size={12} /> + Registrar
+                  </a>
+                </div>
               </div>
             );
           })}
