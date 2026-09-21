@@ -2,7 +2,18 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { businesses, businessTransactions, projects, projectTransactions, loans, loanPayments, transactions, categories } from "@achouse/db/schema";
+import {
+  businesses,
+  businessTransactions,
+  projects,
+  projectTransactions,
+  loans,
+  loanPayments,
+  transactions,
+  categories,
+  householdMembers,
+  memberIncomeSources,
+} from "@achouse/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -23,7 +34,7 @@ export async function getBusinesses() {
   const { householdId } = await getAuthContext();
   await syncBusinessCategories(householdId);
 
-  const [bizList, txs, cats] = await Promise.all([
+  const [bizList, txs, cats, membersList] = await Promise.all([
     db.query.businesses.findMany({
       where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
       orderBy: (b, { asc }) => [asc(b.name)],
@@ -41,14 +52,30 @@ export async function getBusinesses() {
         isNull(categories.deletedAt)
       ),
     }),
+    db.query.householdMembers.findMany({
+      where: and(
+        eq(householdMembers.householdId, householdId),
+        eq(householdMembers.isActive, true)
+      ),
+      with: { incomeSources: true },
+    }),
   ]);
 
   const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
   return bizList.map((b) => {
+    const bizNameClean = b.name.toLowerCase().trim();
+
     // Collect all category IDs that represent this business
     const bizCategoryIds = new Set(
-      cats.filter((c) => c.name.toLowerCase().trim() === b.name.toLowerCase().trim()).map((c) => c.id)
+      cats.filter((c) => c.name.toLowerCase().trim() === bizNameClean).map((c) => c.id)
+    );
+
+    // Find all household members assigned to this business via incomeSources
+    const assignedMembers = membersList.filter((m) =>
+      (m.incomeSources || []).some(
+        (s: any) => s.isActive !== false && s.name.toLowerCase().trim() === bizNameClean
+      )
     );
 
     // Any transaction explicitly linked to businessId OR whose category matches the business
@@ -56,7 +83,7 @@ export async function getBusinesses() {
       (t) =>
         t.businessId === b.id ||
         (t.categoryId && bizCategoryIds.has(t.categoryId)) ||
-        (t.category?.name && t.category.name.toLowerCase().trim() === b.name.toLowerCase().trim())
+        (t.category?.name && t.category.name.toLowerCase().trim() === bizNameClean)
     );
 
     const isIncomeTx = (t: (typeof txs)[0]) =>
@@ -96,21 +123,40 @@ export async function getBusinesses() {
       net,
       transactions: bTxs.length,
       monthlyData: Array.from(monthlyMap.values()),
+      members: assignedMembers.map((m) => ({
+        id: m.id,
+        displayName: m.displayName,
+        role: m.role,
+        avatarUrl: m.avatarUrl,
+      })),
+      memberIds: assignedMembers.map((m) => m.id),
     };
   });
 }
 
-export async function createBusiness(data: { name: string; description?: string; type?: string; currency?: string }) {
-  const { householdId } = await getAuthContext();
+export async function createBusiness(data: {
+  name: string;
+  description?: string;
+  type?: string;
+  currency?: string;
+  memberIds?: string[];
+  expectedMonthlyAmount?: string;
+}) {
+  const { userId, householdId } = await getAuthContext();
   const cleanName = data.name.trim();
 
-  const [biz] = await db.insert(businesses).values({
-    id: createId(),
-    householdId,
-    ...data,
-    name: cleanName,
-    currency: data.currency ?? "DOP",
-  }).returning();
+  const [biz] = await db
+    .insert(businesses)
+    .values({
+      id: createId(),
+      householdId,
+      name: cleanName,
+      description: data.description,
+      type: data.type,
+      currency: data.currency ?? "DOP",
+      isActive: true,
+    })
+    .returning();
 
   // Create both income and expense categories automatically
   try {
@@ -138,9 +184,60 @@ export async function createBusiness(data: { name: string; description?: string;
     console.warn("Could not auto-create categories for business:", catErr);
   }
 
+  // Determine target member IDs (if none provided, find current user's member ID)
+  let targetMemberIds = data.memberIds || [];
+  if (targetMemberIds.length === 0) {
+    const currentMember = await db.query.householdMembers.findFirst({
+      where: and(
+        eq(householdMembers.householdId, householdId),
+        eq(householdMembers.clerkUserId, userId)
+      ),
+    });
+    if (currentMember) {
+      targetMemberIds = [currentMember.id];
+    }
+  }
+
+  // Create or activate memberIncomeSources for each assigned member
+  for (const mId of targetMemberIds) {
+    try {
+      const existing = await db.query.memberIncomeSources.findFirst({
+        where: and(
+          eq(memberIncomeSources.memberId, mId),
+          eq(memberIncomeSources.name, cleanName)
+        ),
+      });
+
+      if (existing) {
+        await db
+          .update(memberIncomeSources)
+          .set({
+            isActive: true,
+            type: "business",
+            currency: data.currency || "DOP",
+            expectedMonthlyAmount: data.expectedMonthlyAmount || existing.expectedMonthlyAmount,
+          })
+          .where(eq(memberIncomeSources.id, existing.id));
+      } else {
+        await db.insert(memberIncomeSources).values({
+          id: createId(),
+          memberId: mId,
+          name: cleanName,
+          type: "business",
+          expectedMonthlyAmount: data.expectedMonthlyAmount || "0",
+          currency: data.currency || "DOP",
+          isActive: true,
+        });
+      }
+    } catch (mErr) {
+      console.warn("Error linking member to business:", mErr);
+    }
+  }
+
   try {
     revalidatePath("/dashboard/businesses");
     revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
   } catch {}
@@ -148,30 +245,111 @@ export async function createBusiness(data: { name: string; description?: string;
   return { success: true, business: biz };
 }
 
-export async function updateBusiness(id: string, data: Partial<{ name: string; description: string; type: string; currency: string; isActive: boolean }>) {
+export async function updateBusiness(
+  id: string,
+  data: Partial<{
+    name: string;
+    description: string;
+    type: string;
+    currency: string;
+    isActive: boolean;
+    memberIds: string[];
+    expectedMonthlyAmount: string;
+  }>
+) {
   const { householdId } = await getAuthContext();
 
   const current = await db.query.businesses.findFirst({
     where: and(eq(businesses.id, id), eq(businesses.householdId, householdId)),
   });
 
-  if (current && data.name && data.name.trim() !== current.name) {
-    const newName = data.name.trim();
+  if (!current) throw new Error("Negocio no encontrado");
+
+  const newName = data.name ? data.name.trim() : current.name;
+
+  if (data.name && data.name.trim() !== current.name) {
     try {
       await db
         .update(categories)
         .set({ name: newName })
         .where(and(eq(categories.householdId, householdId), eq(categories.name, current.name)));
+
+      // Update existing income sources name
+      const allMembers = await db.query.householdMembers.findMany({
+        where: eq(householdMembers.householdId, householdId),
+        with: { incomeSources: true },
+      });
+
+      for (const m of allMembers) {
+        for (const s of m.incomeSources || []) {
+          if (s.name.toLowerCase().trim() === current.name.toLowerCase().trim()) {
+            await db
+              .update(memberIncomeSources)
+              .set({ name: newName })
+              .where(eq(memberIncomeSources.id, s.id));
+          }
+        }
+      }
     } catch (renameErr) {
-      console.warn("Could not rename categories for business:", renameErr);
+      console.warn("Could not rename categories/sources for business:", renameErr);
     }
   }
 
-  await db.update(businesses).set(data).where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
+  // Update member associations if memberIds is provided
+  if (data.memberIds !== undefined) {
+    const selectedSet = new Set(data.memberIds);
+    const allMembers = await db.query.householdMembers.findMany({
+      where: eq(householdMembers.householdId, householdId),
+      with: { incomeSources: true },
+    });
+
+    for (const m of allMembers) {
+      const existingSource = (m.incomeSources || []).find(
+        (s: any) =>
+          s.name.toLowerCase().trim() === current.name.toLowerCase().trim() ||
+          s.name.toLowerCase().trim() === newName.toLowerCase().trim()
+      );
+
+      if (selectedSet.has(m.id)) {
+        if (existingSource) {
+          if (!existingSource.isActive || existingSource.name !== newName) {
+            await db
+              .update(memberIncomeSources)
+              .set({ isActive: true, name: newName, currency: data.currency || current.currency || "DOP" })
+              .where(eq(memberIncomeSources.id, existingSource.id));
+          }
+        } else {
+          await db.insert(memberIncomeSources).values({
+            id: createId(),
+            memberId: m.id,
+            name: newName,
+            type: "business",
+            expectedMonthlyAmount: data.expectedMonthlyAmount || "0",
+            currency: data.currency || current.currency || "DOP",
+            isActive: true,
+          });
+        }
+      } else {
+        if (existingSource && existingSource.isActive) {
+          await db
+            .update(memberIncomeSources)
+            .set({ isActive: false })
+            .where(eq(memberIncomeSources.id, existingSource.id));
+        }
+      }
+    }
+  }
+
+  const { memberIds, expectedMonthlyAmount, ...bizUpdateData } = data;
+  await db
+    .update(businesses)
+    .set({ ...bizUpdateData, name: newName })
+    .where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
 
   try {
     revalidatePath("/dashboard/businesses");
     revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
   } catch {}
@@ -192,14 +370,36 @@ export async function deleteBusiness(id: string) {
         .update(categories)
         .set({ deletedAt: new Date(), isActive: false })
         .where(and(eq(categories.householdId, householdId), eq(categories.name, current.name)));
-    } catch {}
+
+      const allMembers = await db.query.householdMembers.findMany({
+        where: eq(householdMembers.householdId, householdId),
+        with: { incomeSources: true },
+      });
+
+      for (const m of allMembers) {
+        for (const s of m.incomeSources || []) {
+          if (s.name.toLowerCase().trim() === current.name.toLowerCase().trim()) {
+            await db
+              .update(memberIncomeSources)
+              .set({ isActive: false })
+              .where(eq(memberIncomeSources.id, s.id));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Error cleaning up business relations:", err);
+    }
   }
 
-  await db.update(businesses).set({ deletedAt: new Date(), isActive: false }).where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
+  await db
+    .update(businesses)
+    .set({ deletedAt: new Date(), isActive: false })
+    .where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
 
   try {
     revalidatePath("/dashboard/businesses");
     revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
   } catch {}

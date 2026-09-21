@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { db } from "@achouse/db";
-import { memberIncomeSources, householdMembers } from "@achouse/db/schema";
+import { memberIncomeSources, householdMembers, businesses } from "@achouse/db/schema";
 import { requireRole } from "@/lib/auth-guard";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
+import { syncBusinessCategories } from "@/lib/actions/entities";
 import { z } from "zod";
 
 const incomeSourceSchema = z.object({
   name: z.string().min(1, "El nombre es obligatorio"),
   type: z.enum(["job", "business", "project"]),
   expectedMonthlyAmount: z.string().min(1, "El monto es obligatorio"),
-  currency: z.string().default("USD"),
+  currency: z.string().default("DOP"),
 });
 
 export async function GET(
@@ -56,18 +58,45 @@ export async function POST(
     }
 
     const { name, type, expectedMonthlyAmount, currency } = parsed.data;
+    const cleanName = name.trim();
 
     const [source] = await db
       .insert(memberIncomeSources)
       .values({
         memberId,
-        name,
+        name: cleanName,
         type,
         expectedMonthlyAmount,
         currency,
         isActive: true,
       })
       .returning();
+
+    // Auto-create / sync Business
+    try {
+      const existingBiz = await db.query.businesses.findFirst({
+        where: and(
+          eq(businesses.householdId, householdId),
+          isNull(businesses.deletedAt),
+          eq(businesses.name, cleanName)
+        ),
+      });
+
+      if (!existingBiz) {
+        await db.insert(businesses).values({
+          id: createId(),
+          householdId,
+          name: cleanName,
+          type: type === "job" ? "Empleo / Nómina" : type === "project" ? "Inversión / Proyecto" : "Comercio",
+          currency: currency || "DOP",
+          isActive: true,
+        });
+      }
+
+      await syncBusinessCategories(householdId);
+    } catch (bizErr) {
+      console.warn("[income-sources route] Could not auto-sync business/categories:", bizErr);
+    }
 
     return NextResponse.json({ source }, { status: 201 });
   } catch (error) {

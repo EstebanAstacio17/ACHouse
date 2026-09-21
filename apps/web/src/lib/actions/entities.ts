@@ -2,8 +2,8 @@
 
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { categories, accounts, householdMembers, householdInvitations, businesses } from "@achouse/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { categories, accounts, householdMembers, householdInvitations, businesses, memberIncomeSources, transactions } from "@achouse/db/schema";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
@@ -239,17 +239,32 @@ export async function deleteAccount(id: string) {
 
 export async function getMembers() {
   const { userId, householdId } = await getAuthContext();
-  const members = await db.query.householdMembers.findMany({
-    where: and(eq(householdMembers.householdId, householdId), eq(householdMembers.isActive, true)),
-    with: { incomeSources: true },
-  });
 
-  const invitations = await db.query.householdInvitations.findMany({
-    where: and(
-      eq(householdInvitations.householdId, householdId),
-      eq(householdInvitations.status, "pending")
-    ),
-  });
+  const [members, invitations, txs, bizList, allCats] = await Promise.all([
+    db.query.householdMembers.findMany({
+      where: and(eq(householdMembers.householdId, householdId), eq(householdMembers.isActive, true)),
+      with: { incomeSources: true },
+    }),
+    db.query.householdInvitations.findMany({
+      where: and(
+        eq(householdInvitations.householdId, householdId),
+        eq(householdInvitations.status, "pending")
+      ),
+    }),
+    db.query.transactions.findMany({
+      where: and(
+        eq(transactions.householdId, householdId),
+        isNull(transactions.deletedAt)
+      ),
+      with: { category: true, business: true },
+    }),
+    db.query.businesses.findMany({
+      where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
+    }),
+    db.query.categories.findMany({
+      where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+    }),
+  ]);
 
   const isRoleOrGenericName = (name?: string | null) => {
     if (!name || !name.trim()) return true;
@@ -290,7 +305,7 @@ export async function getMembers() {
     console.error("[getMembers] Error auto-updating current user name from Clerk:", err);
   }
 
-  // 2. Enrich members with email and pending status
+  // 2. Enrich members with email, pending status, and calculated financial metrics
   let client: any = null;
   try {
     client = await clerkClient();
@@ -336,12 +351,82 @@ export async function getMembers() {
         }
       }
 
+      // Filter active income sources for this member
+      const activeSources = (m.incomeSources || []).filter((s: any) => s.isActive !== false);
+
+      // Collect business names linked to this member
+      const memberBizNames = new Set(
+        activeSources.map((s: any) => s.name.toLowerCase().trim())
+      );
+      const memberBizIds = new Set(
+        bizList.filter((b) => memberBizNames.has(b.name.toLowerCase().trim())).map((b) => b.id)
+      );
+
+      // Find all transactions directly belonging to member OR to businesses owned by this member
+      const memberTxs = txs.filter((t) => {
+        if (t.memberId === m.id) return true;
+        if (t.businessId && memberBizIds.has(t.businessId)) return true;
+        if (t.category?.name && memberBizNames.has(t.category.name.toLowerCase().trim())) return true;
+        return false;
+      });
+
+      const isIncomeTx = (t: (typeof txs)[0]) =>
+        t.type === "income" || (t.type === "transfer" && t.category?.type === "income");
+
+      const isExpenseTx = (t: (typeof txs)[0]) =>
+        t.type === "expense" || (t.type === "transfer" && t.category?.type !== "income");
+
+      const monthlyIncome = memberTxs
+        .filter(isIncomeTx)
+        .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+      const monthlyExpenses = memberTxs
+        .filter(isExpenseTx)
+        .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+      // Enrich each income source with actual income and expenses from transactions
+      const enrichedSources = activeSources.map((src: any) => {
+        const srcNameClean = src.name.toLowerCase().trim();
+        const matchingBiz = bizList.find((b) => b.name.toLowerCase().trim() === srcNameClean);
+
+        const srcTxs = txs.filter((t) => {
+          if (t.memberId === m.id && t.category?.name?.toLowerCase().trim() === srcNameClean) return true;
+          if (matchingBiz && t.businessId === matchingBiz.id) return true;
+          if (t.category?.name?.toLowerCase().trim() === srcNameClean) return true;
+          return false;
+        });
+
+        const actualIncome = srcTxs
+          .filter(isIncomeTx)
+          .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+        const actualExpenses = srcTxs
+          .filter(isExpenseTx)
+          .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+        return {
+          id: src.id,
+          name: src.name,
+          type: src.type,
+          expectedMonthlyAmount: String(src.expectedMonthlyAmount || "0"),
+          currency: src.currency || "DOP",
+          actualIncome,
+          actualExpenses,
+          net: actualIncome - actualExpenses,
+          transactionsCount: srcTxs.length,
+        };
+      });
+
       return {
         ...m,
         email,
         isPendingInvite,
         inviteToken,
         isCurrentUser: m.clerkUserId === userId,
+        incomeSources: enrichedSources,
+        monthlyIncome,
+        monthlyExpenses,
+        netBalance: monthlyIncome - monthlyExpenses,
       };
     })
   );
@@ -424,6 +509,7 @@ export async function inviteMember(data: {
       incomeSources: [],
       monthlyIncome: 0,
       monthlyExpenses: 0,
+      netBalance: 0,
     },
     inviteUrl,
     token,
@@ -472,5 +558,122 @@ export async function updateMemberDisplayName(memberId: string, displayName: str
     .where(and(eq(householdMembers.id, memberId), eq(householdMembers.householdId, householdId)));
   revalidatePath("/dashboard/members");
   revalidatePath("/dashboard/transactions");
+  return { success: true };
+}
+
+export async function addMemberIncomeSource(data: {
+  memberId: string;
+  name: string;
+  type: "job" | "business" | "project";
+  expectedMonthlyAmount: string;
+  currency: string;
+  memberIds?: string[];
+}) {
+  const { householdId } = await getAuthContext();
+  const cleanName = data.name.trim();
+  const targetMemberIds = Array.from(
+    new Set([data.memberId, ...(data.memberIds || [])])
+  ).filter(Boolean);
+
+  // 1. Add/reactivate income source for each selected member
+  const createdSources = [];
+  for (const mId of targetMemberIds) {
+    const existing = await db.query.memberIncomeSources.findFirst({
+      where: and(
+        eq(memberIncomeSources.memberId, mId),
+        eq(memberIncomeSources.name, cleanName)
+      ),
+    });
+
+    if (existing) {
+      const [updated] = await db
+        .update(memberIncomeSources)
+        .set({
+          isActive: true,
+          type: data.type,
+          expectedMonthlyAmount: data.expectedMonthlyAmount,
+          currency: data.currency || "DOP",
+        })
+        .where(eq(memberIncomeSources.id, existing.id))
+        .returning();
+      createdSources.push(updated);
+    } else {
+      const [inserted] = await db
+        .insert(memberIncomeSources)
+        .values({
+          id: createId(),
+          memberId: mId,
+          name: cleanName,
+          type: data.type,
+          expectedMonthlyAmount: data.expectedMonthlyAmount,
+          currency: data.currency || "DOP",
+          isActive: true,
+        })
+        .returning();
+      createdSources.push(inserted);
+    }
+  }
+
+  // 2. Automatically create/sync Business entity in businesses table
+  const existingBiz = await db.query.businesses.findFirst({
+    where: and(
+      eq(businesses.householdId, householdId),
+      isNull(businesses.deletedAt),
+      eq(businesses.name, cleanName)
+    ),
+  });
+
+  if (!existingBiz) {
+    const bizType =
+      data.type === "job"
+        ? "Empleo / Nómina"
+        : data.type === "project"
+        ? "Inversión / Proyecto"
+        : "Comercio";
+
+    await db.insert(businesses).values({
+      id: createId(),
+      householdId,
+      name: cleanName,
+      type: bizType,
+      currency: data.currency || "DOP",
+      isActive: true,
+    });
+  }
+
+  // 3. Automatically create/sync Categories (both Income and Expense)
+  await syncBusinessCategories(householdId);
+
+  try {
+    revalidatePath("/dashboard/members");
+    revalidatePath("/dashboard/businesses");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
+  } catch {}
+
+  return { success: true, sources: createdSources };
+}
+
+export async function deleteMemberIncomeSource(sourceId: string, memberId: string) {
+  const { householdId } = await getAuthContext();
+  await db
+    .update(memberIncomeSources)
+    .set({ isActive: false })
+    .where(
+      and(
+        eq(memberIncomeSources.id, sourceId),
+        eq(memberIncomeSources.memberId, memberId)
+      )
+    );
+
+  try {
+    revalidatePath("/dashboard/members");
+    revalidatePath("/dashboard/businesses");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
+  } catch {}
+
   return { success: true };
 }
