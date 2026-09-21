@@ -4,6 +4,7 @@ import { transactions, accounts, categories, householdMembers } from "@achouse/d
 import { requireRole } from "@/lib/auth-guard";
 import { eq, and, isNull, gte, lte, ilike, desc, sql } from "drizzle-orm";
 import { z } from "zod";
+import { createId } from "@paralleldrive/cuid2";
 
 const transactionSchema = z.object({
   accountId: z.string().min(1, "La cuenta es obligatoria"),
@@ -130,6 +131,7 @@ export async function POST(
     const [transaction] = await db
       .insert(transactions)
       .values({
+        id: createId(),
         householdId,
         accountId: d.accountId,
         toAccountId: d.type === "transfer" ? d.toAccountId : null,

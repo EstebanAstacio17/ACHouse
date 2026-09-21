@@ -13,6 +13,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { transactionSchema } from "@achouse/types";
 import { getActiveHouseholdId } from "@/lib/household";
+import { createId } from "@paralleldrive/cuid2";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -190,9 +191,11 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
     }
 
     // 4. Insert transaction directly (neon-http driver does not support interactive transactions)
+    const newTxId = createId();
     const [insertedTx] = await db
       .insert(transactions)
       .values({
+        id: newTxId,
         householdId,
         accountId: account.id,
         categoryId,
@@ -242,9 +245,29 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       .set({ balance: newBalance.toFixed(2), updatedAt: new Date() })
       .where(eq(accounts.id, account.id));
 
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/transactions");
-    return { success: true, transaction: insertedTx };
+    try {
+      revalidatePath("/dashboard");
+      revalidatePath("/dashboard/transactions");
+    } catch (revErr) {
+      console.warn("revalidatePath warning:", revErr);
+    }
+
+    const serializedTx = {
+      id: insertedTx.id,
+      description: insertedTx.description,
+      type: insertedTx.type,
+      amount: String(insertedTx.amount),
+      currency: insertedTx.currency,
+      date: insertedTx.date instanceof Date ? insertedTx.date.toISOString() : String(insertedTx.date),
+      status: insertedTx.status,
+      isRecurring: insertedTx.isRecurring,
+      accountId: insertedTx.accountId,
+      categoryId: insertedTx.categoryId,
+      memberId: insertedTx.memberId,
+      toAccountId: insertedTx.toAccountId,
+    };
+
+    return { success: true, transaction: serializedTx };
   } catch (err: any) {
     console.error("Error in createTransaction:", err);
     return { success: false, error: err?.message || "Error al registrar la transacción" };
