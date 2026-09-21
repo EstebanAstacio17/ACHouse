@@ -2,7 +2,7 @@
 
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { categories, accounts, householdMembers, householdInvitations } from "@achouse/db/schema";
+import { categories, accounts, householdMembers, householdInvitations, businesses } from "@achouse/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { revalidatePath } from "next/cache";
@@ -57,8 +57,58 @@ const categorySchema = z.object({
   parentId: z.string().nullable().optional(),
 });
 
+export async function syncBusinessCategories(householdId: string) {
+  try {
+    const [bizList, existingCats] = await Promise.all([
+      db.query.businesses.findMany({
+        where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt), eq(businesses.isActive, true)),
+      }),
+      db.query.categories.findMany({
+        where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+      }),
+    ]);
+
+    for (const biz of bizList) {
+      // 1. Check/create Income category for business
+      const hasIncome = existingCats.some(
+        c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === "income"
+      );
+      if (!hasIncome) {
+        await db.insert(categories).values({
+          id: createId(),
+          householdId,
+          name: biz.name.trim(),
+          type: "income",
+          color: "#10b981",
+          icon: "building-2",
+          isActive: true,
+        });
+      }
+
+      // 2. Check/create Expense category for business
+      const hasExpense = existingCats.some(
+        c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === "expense"
+      );
+      if (!hasExpense) {
+        await db.insert(categories).values({
+          id: createId(),
+          householdId,
+          name: biz.name.trim(),
+          type: "expense",
+          color: "#6366f1",
+          icon: "building-2",
+          isActive: true,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Error in syncBusinessCategories:", err);
+  }
+}
+
 export async function getCategories() {
   const { householdId } = await getAuthContext();
+  await syncBusinessCategories(householdId);
   return db.query.categories.findMany({
     where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt), eq(categories.isActive, true)),
     orderBy: (c, { asc }) => [asc(c.type), asc(c.name)],

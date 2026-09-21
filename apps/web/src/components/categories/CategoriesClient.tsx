@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Tag, ChevronRight, Pencil, Trash2, X, Check, Layers } from "lucide-react";
+import { Plus, Tag, ChevronRight, Pencil, Trash2, X, Check, Layers, Building2 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
 import { getCategories, createCategory, updateCategory, deleteCategory } from "@/lib/actions/entities";
+import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
 import { CategoryIcon, POPULAR_CATEGORY_ICONS } from "./CategoryIcon";
 
 export interface CategoryChild {
@@ -261,6 +262,7 @@ function CategoryModal({
 export function CategoriesClient() {
   const toast = useToast();
   const [categories, setCategories] = useState<CategoryItem[]>(INITIAL_CATEGORIES);
+  const [businesses, setBusinesses] = useState<Array<{ id: string; name: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [parentForModal, setParentForModal] = useState<CategoryItem | undefined>();
   const [editingItem, setEditingItem] = useState<CategoryItem | CategoryChild | null>(null);
@@ -269,9 +271,13 @@ export function CategoriesClient() {
 
   useEffect(() => {
     let active = true;
-    getCategories()
-      .then((data) => {
-        if (active && data) {
+    Promise.all([getCategories(), getBusinesses()])
+      .then(([data, bizData]) => {
+        if (!active) return;
+        if (bizData) {
+          setBusinesses(bizData.map((b: any) => ({ id: b.id, name: b.name })));
+        }
+        if (data) {
           const parents = data.filter((c: any) => !c.parentId);
           const children = data.filter((c: any) => c.parentId);
 
@@ -556,7 +562,28 @@ export function CategoriesClient() {
                     <CategoryIcon icon={cat.icon} size={20} color={cat.color} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 700, fontSize: "0.9375rem", letterSpacing: "-0.01em" }}>{cat.name}</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <p style={{ fontWeight: 700, fontSize: "0.9375rem", letterSpacing: "-0.01em" }}>{cat.name}</p>
+                      {businesses.some(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim()) && (
+                        <span
+                          className="badge"
+                          style={{
+                            fontSize: "0.6875rem",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 3,
+                            background: "var(--color-investment-dim)",
+                            color: "var(--color-investment)",
+                            border: "1px solid var(--border-subtle)",
+                            padding: "0.1rem 0.4rem",
+                            borderRadius: 4,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <Building2 size={10} /> Empresa / Negocio
+                        </span>
+                      )}
+                    </div>
                     <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
                       {cat.children.length} {cat.children.length === 1 ? "subcategoría" : "subcategorías"}
                     </p>

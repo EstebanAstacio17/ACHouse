@@ -2,12 +2,13 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { businesses, businessTransactions, projects, projectTransactions, loans, loanPayments, transactions } from "@achouse/db/schema";
+import { businesses, businessTransactions, projects, projectTransactions, loans, loanPayments, transactions, categories } from "@achouse/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getActiveHouseholdId } from "@/lib/household";
 import { createId } from "@paralleldrive/cuid2";
+import { syncBusinessCategories } from "./entities";
 
 async function getAuthContext() {
   const { userId } = await auth();
@@ -20,7 +21,9 @@ async function getAuthContext() {
 
 export async function getBusinesses() {
   const { householdId } = await getAuthContext();
-  const [bizList, txs] = await Promise.all([
+  await syncBusinessCategories(householdId);
+
+  const [bizList, txs, cats] = await Promise.all([
     db.query.businesses.findMany({
       where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
       orderBy: (b, { asc }) => [asc(b.name)],
@@ -30,19 +33,43 @@ export async function getBusinesses() {
         eq(transactions.householdId, householdId),
         isNull(transactions.deletedAt)
       ),
+      with: { category: true },
+    }),
+    db.query.categories.findMany({
+      where: and(
+        eq(categories.householdId, householdId),
+        isNull(categories.deletedAt)
+      ),
     }),
   ]);
 
   const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
   return bizList.map((b) => {
-    const bTxs = txs.filter((t) => t.businessId === b.id);
+    // Collect all category IDs that represent this business
+    const bizCategoryIds = new Set(
+      cats.filter((c) => c.name.toLowerCase().trim() === b.name.toLowerCase().trim()).map((c) => c.id)
+    );
+
+    // Any transaction explicitly linked to businessId OR whose category matches the business
+    const bTxs = txs.filter(
+      (t) => t.businessId === b.id || (t.categoryId && bizCategoryIds.has(t.categoryId))
+    );
+
+    const isIncomeTx = (t: (typeof txs)[0]) =>
+      t.type === "income" || (t.type === "transfer" && t.category?.type === "income");
+
+    const isExpenseTx = (t: (typeof txs)[0]) =>
+      t.type === "expense" || (t.type === "transfer" && t.category?.type !== "income");
+
     const income = bTxs
-      .filter((t) => t.type === "income")
+      .filter(isIncomeTx)
       .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+
     const expenses = bTxs
-      .filter((t) => t.type === "expense")
+      .filter(isExpenseTx)
       .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+
     const net = income - expenses;
 
     const monthlyMap = new Map<string, { month: string; income: number; expenses: number }>();
@@ -51,8 +78,11 @@ export async function getBusinesses() {
       const mKey = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(-2)}`;
       const cur = monthlyMap.get(mKey) ?? { month: mKey, income: 0, expenses: 0 };
       const amt = parseFloat(t.amount || "0");
-      if (t.type === "income") cur.income += amt;
-      else if (t.type === "expense") cur.expenses += amt;
+      if (isIncomeTx(t)) {
+        cur.income += amt;
+      } else {
+        cur.expenses += amt;
+      }
       monthlyMap.set(mKey, cur);
     });
 
@@ -69,39 +99,147 @@ export async function getBusinesses() {
 
 export async function createBusiness(data: { name: string; description?: string; type?: string; currency?: string }) {
   const { householdId } = await getAuthContext();
+  const cleanName = data.name.trim();
+
   const [biz] = await db.insert(businesses).values({
     id: createId(),
     householdId,
     ...data,
+    name: cleanName,
     currency: data.currency ?? "DOP",
   }).returning();
-  revalidatePath("/dashboard/businesses");
+
+  // Create both income and expense categories automatically
+  try {
+    await db.insert(categories).values([
+      {
+        id: createId(),
+        householdId,
+        name: cleanName,
+        type: "income",
+        color: "#10b981",
+        icon: "building-2",
+        isActive: true,
+      },
+      {
+        id: createId(),
+        householdId,
+        name: cleanName,
+        type: "expense",
+        color: "#6366f1",
+        icon: "building-2",
+        isActive: true,
+      },
+    ]);
+  } catch (catErr) {
+    console.warn("Could not auto-create categories for business:", catErr);
+  }
+
+  try {
+    revalidatePath("/dashboard/businesses");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
+  } catch {}
+
   return { success: true, business: biz };
 }
 
 export async function updateBusiness(id: string, data: Partial<{ name: string; description: string; type: string; currency: string; isActive: boolean }>) {
   const { householdId } = await getAuthContext();
+
+  const current = await db.query.businesses.findFirst({
+    where: and(eq(businesses.id, id), eq(businesses.householdId, householdId)),
+  });
+
+  if (current && data.name && data.name.trim() !== current.name) {
+    const newName = data.name.trim();
+    try {
+      await db
+        .update(categories)
+        .set({ name: newName })
+        .where(and(eq(categories.householdId, householdId), eq(categories.name, current.name)));
+    } catch (renameErr) {
+      console.warn("Could not rename categories for business:", renameErr);
+    }
+  }
+
   await db.update(businesses).set(data).where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
-  revalidatePath("/dashboard/businesses");
+
+  try {
+    revalidatePath("/dashboard/businesses");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
+  } catch {}
+
   return { success: true };
 }
 
 export async function deleteBusiness(id: string) {
   const { householdId } = await getAuthContext();
+
+  const current = await db.query.businesses.findFirst({
+    where: and(eq(businesses.id, id), eq(businesses.householdId, householdId)),
+  });
+
+  if (current) {
+    try {
+      await db
+        .update(categories)
+        .set({ deletedAt: new Date(), isActive: false })
+        .where(and(eq(categories.householdId, householdId), eq(categories.name, current.name)));
+    } catch {}
+  }
+
   await db.update(businesses).set({ deletedAt: new Date(), isActive: false }).where(and(eq(businesses.id, id), eq(businesses.householdId, householdId)));
-  revalidatePath("/dashboard/businesses");
+
+  try {
+    revalidatePath("/dashboard/businesses");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
+  } catch {}
+
   return { success: true };
 }
 
 export async function getBusinessPL(businessId: string) {
-  const txs = await db.query.transactions.findMany({
-    where: and(eq(transactions.businessId, businessId), isNull(transactions.deletedAt)),
-    orderBy: [desc(transactions.date)],
-    with: { category: true, member: true, account: true },
+  const { householdId } = await getAuthContext();
+
+  const biz = await db.query.businesses.findFirst({
+    where: and(eq(businesses.id, businessId), eq(businesses.householdId, householdId)),
   });
-  const income = txs.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
-  const expenses = txs.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
-  return { income, expenses, net: income - expenses, transactions: txs };
+
+  const [txs, cats] = await Promise.all([
+    db.query.transactions.findMany({
+      where: and(eq(transactions.householdId, householdId), isNull(transactions.deletedAt)),
+      orderBy: [desc(transactions.date)],
+      with: { category: true, member: true, account: true },
+    }),
+    db.query.categories.findMany({
+      where: and(eq(categories.householdId, householdId), isNull(categories.deletedAt)),
+    }),
+  ]);
+
+  const bizCategoryIds = biz
+    ? new Set(cats.filter((c) => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim()).map((c) => c.id))
+    : new Set<string>();
+
+  const bTxs = txs.filter(
+    (t) => t.businessId === businessId || (t.categoryId && bizCategoryIds.has(t.categoryId))
+  );
+
+  const isIncomeTx = (t: (typeof txs)[0]) =>
+    t.type === "income" || (t.type === "transfer" && t.category?.type === "income");
+
+  const isExpenseTx = (t: (typeof txs)[0]) =>
+    t.type === "expense" || (t.type === "transfer" && t.category?.type !== "income");
+
+  const income = bTxs.filter(isIncomeTx).reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+  const expenses = bTxs.filter(isExpenseTx).reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+
+  return { income, expenses, net: income - expenses, transactions: bTxs };
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────

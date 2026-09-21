@@ -7,6 +7,7 @@ import {
   categories,
   accounts,
   householdMembers,
+  businesses,
 } from "@achouse/db/schema";
 import { eq, and, desc, gte, lte, ilike, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -166,8 +167,10 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       account = fallbackAccount;
     }
 
-    // 2. Validate category if provided
+    // 2. Validate category and business with bidirectional correlation
     let categoryId: string | null = parsed.categoryId ?? null;
+    let businessId: string | null = parsed.businessId ?? null;
+
     if (categoryId) {
       const cat = await db.query.categories.findFirst({
         where: and(
@@ -178,6 +181,39 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       });
       if (!cat) {
         categoryId = null;
+      } else if (!businessId) {
+        // If category belongs to a business, link businessId automatically
+        const matchingBiz = await db.query.businesses.findFirst({
+          where: and(
+            eq(businesses.householdId, householdId),
+            isNull(businesses.deletedAt),
+            eq(businesses.name, cat.name)
+          ),
+        });
+        if (matchingBiz) {
+          businessId = matchingBiz.id;
+        }
+      }
+    }
+
+    if (businessId && !categoryId) {
+      // If businessId is specified without category, auto-link to the business's corresponding category
+      const biz = await db.query.businesses.findFirst({
+        where: and(eq(businesses.id, businessId), eq(businesses.householdId, householdId)),
+      });
+      if (biz) {
+        const targetType = parsed.type === "income" ? "income" : "expense";
+        const matchingCat = await db.query.categories.findFirst({
+          where: and(
+            eq(categories.householdId, householdId),
+            isNull(categories.deletedAt),
+            eq(categories.name, biz.name),
+            eq(categories.type, targetType)
+          ),
+        });
+        if (matchingCat) {
+          categoryId = matchingCat.id;
+        }
       }
     }
 
@@ -205,7 +241,7 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
         accountId: account.id,
         categoryId,
         memberId,
-        businessId: parsed.businessId ?? null,
+        businessId,
         projectId: parsed.projectId ?? null,
         type: parsed.type,
         amount: parsed.amount.toString(),
@@ -296,10 +332,53 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
       return { success: false, error: "Transacción no encontrada" };
     }
 
+    let categoryId = data.categoryId;
+    let businessId = data.businessId;
+
+    if (categoryId && businessId === undefined) {
+      const cat = await db.query.categories.findFirst({
+        where: and(eq(categories.id, categoryId), eq(categories.householdId, householdId)),
+      });
+      if (cat) {
+        const matchingBiz = await db.query.businesses.findFirst({
+          where: and(
+            eq(businesses.householdId, householdId),
+            isNull(businesses.deletedAt),
+            eq(businesses.name, cat.name)
+          ),
+        });
+        if (matchingBiz) {
+          businessId = matchingBiz.id;
+        }
+      }
+    }
+
+    if (businessId && categoryId === undefined) {
+      const biz = await db.query.businesses.findFirst({
+        where: and(eq(businesses.id, businessId), eq(businesses.householdId, householdId)),
+      });
+      if (biz) {
+        const targetType = (data.type || existing.type) === "income" ? "income" : "expense";
+        const matchingCat = await db.query.categories.findFirst({
+          where: and(
+            eq(categories.householdId, householdId),
+            isNull(categories.deletedAt),
+            eq(categories.name, biz.name),
+            eq(categories.type, targetType)
+          ),
+        });
+        if (matchingCat) {
+          categoryId = matchingCat.id;
+        }
+      }
+    }
+
     await db
       .update(transactions)
       .set({
         ...data,
+        categoryId: categoryId !== undefined ? categoryId : undefined,
+        businessId: businessId !== undefined ? businessId : undefined,
         amount: data.amount?.toString(),
         date: data.date ? new Date(data.date) : undefined,
         updatedAt: new Date(),

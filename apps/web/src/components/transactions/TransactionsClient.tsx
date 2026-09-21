@@ -106,8 +106,17 @@ function TransactionModal({
 
   const initialType = (initialData?.type ?? "expense") as "income" | "expense" | "transfer";
   const initialNormType = normalizeType(initialType);
-  const matchingInitialCats = categoriesList.filter(c => normalizeType(c.type) === initialNormType);
+  const matchingInitialCats = categoriesList.filter(c => initialNormType === "transfer" ? true : normalizeType(c.type) === initialNormType);
   const defaultCatId = initialData?.category?.id || (matchingInitialCats.find(c => c.name === initialData?.category?.name)?.id ?? (matchingInitialCats[0]?.id || ""));
+
+  const initialBusinessId = useMemo(() => {
+    if (initialData?.business?.id) return initialData.business.id;
+    if (initialData?.category?.name) {
+      const match = businessesList.find(b => b.name.toLowerCase().trim() === initialData.category?.name.toLowerCase().trim());
+      if (match) return match.id;
+    }
+    return "";
+  }, [initialData, businessesList]);
 
   const initialMemberId = useMemo(() => {
     if (initialData?.member?.id) return initialData.member.id;
@@ -133,7 +142,8 @@ function TransactionModal({
     accountId: initialData?.account?.id || (accountsList.find(a => a.name === initialData?.account?.name)?.id ?? (accountsList[0]?.id || "")),
     toAccountId: initialData?.toAccount?.id || (accountsList[1]?.id || ""),
     memberId: initialMemberId,
-    businessId: initialData?.business?.id || "",
+    businessId: initialBusinessId,
+    transferFlow: "expense" as "income" | "expense",
     status: initialData?.status ?? "cleared",
     isRecurring: initialData?.isRecurring ?? false,
     recurringFrequency: initialData?.recurringFrequency ?? "Mensual",
@@ -159,24 +169,96 @@ function TransactionModal({
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
+  const { businessCategories, generalCategories } = useMemo(() => {
+    const targetNorm = normalizeType(form.type);
+    const available = targetNorm === "transfer"
+      ? categoriesList
+      : categoriesList.filter(c => normalizeType(c.type) === targetNorm);
+
+    const bizNames = new Set(businessesList.map(b => b.name.toLowerCase().trim()));
+    const bizCats: typeof categoriesList = [];
+    const genCats: typeof categoriesList = [];
+
+    available.forEach(c => {
+      if (bizNames.has(c.name.toLowerCase().trim())) {
+        bizCats.push(c);
+      } else {
+        genCats.push(c);
+      }
+    });
+
+    return { businessCategories: bizCats, generalCategories: genCats };
+  }, [categoriesList, businessesList, form.type]);
+
+  const handleCategoryChange = (newCatId: string) => {
+    const cat = categoriesList.find(c => c.id === newCatId);
+    let linkedBizId = form.businessId;
+    if (cat) {
+      const matchBiz = businessesList.find(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim());
+      if (matchBiz) {
+        linkedBizId = matchBiz.id;
+      }
+    }
+    setForm(prev => ({
+      ...prev,
+      categoryId: newCatId,
+      businessId: linkedBizId,
+    }));
+  };
+
+  const handleBusinessChange = (newBizId: string) => {
+    let linkedCatId = form.categoryId;
+    if (newBizId) {
+      const biz = businessesList.find(b => b.id === newBizId);
+      if (biz) {
+        const targetNorm = normalizeType(form.type);
+        const desiredType = targetNorm === "transfer" ? form.transferFlow : targetNorm;
+        const matchCat = categoriesList.find(
+          c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && normalizeType(c.type) === desiredType
+        );
+        if (matchCat) {
+          linkedCatId = matchCat.id;
+        }
+      }
+    } else {
+      const currentCat = categoriesList.find(c => c.id === form.categoryId);
+      if (currentCat && businessesList.some(b => b.name.toLowerCase().trim() === currentCat.name.toLowerCase().trim())) {
+        linkedCatId = "";
+      }
+    }
+    setForm(prev => ({
+      ...prev,
+      businessId: newBizId,
+      categoryId: linkedCatId,
+    }));
+  };
+
   const handleTypeChange = (newType: "income" | "expense" | "transfer") => {
     const targetNorm = normalizeType(newType);
     setForm(prev => {
-      const matchingCats = categoriesList.filter(c => normalizeType(c.type) === targetNorm);
-      const stillValid = matchingCats.some(c => c.id === prev.categoryId);
+      let newCatId = "";
+      if (prev.businessId) {
+        const biz = businessesList.find(b => b.id === prev.businessId);
+        if (biz) {
+          const desiredType = targetNorm === "transfer" ? prev.transferFlow : targetNorm;
+          const matchCat = categoriesList.find(
+            c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && normalizeType(c.type) === desiredType
+          );
+          if (matchCat) newCatId = matchCat.id;
+        }
+      }
+      if (!newCatId) {
+        const matchingCats = categoriesList.filter(c => targetNorm === "transfer" ? true : normalizeType(c.type) === targetNorm);
+        const stillValid = matchingCats.some(c => c.id === prev.categoryId);
+        newCatId = stillValid ? prev.categoryId : (matchingCats[0]?.id || "");
+      }
       return {
         ...prev,
         type: newType,
-        categoryId: targetNorm === "transfer" ? "" : (stillValid ? prev.categoryId : (matchingCats[0]?.id || "")),
+        categoryId: newCatId,
       };
     });
   };
-
-  const filteredCategories = useMemo(() => {
-    const targetNorm = normalizeType(form.type);
-    if (targetNorm === "transfer") return [];
-    return categoriesList.filter(c => normalizeType(c.type) === targetNorm);
-  }, [categoriesList, form.type]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -189,6 +271,17 @@ function TransactionModal({
       reader.readAsDataURL(file);
     }
   };
+
+  const activeBusiness = useMemo(() => {
+    if (form.businessId) {
+      return businessesList.find(b => b.id === form.businessId) || null;
+    }
+    const cat = categoriesList.find(c => c.id === form.categoryId);
+    if (cat) {
+      return businessesList.find(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim()) || null;
+    }
+    return null;
+  }, [form.businessId, form.categoryId, businessesList, categoriesList]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,7 +301,11 @@ function TransactionModal({
     const selectedAcc = accountsList.find(a => a.id === form.accountId) || accountsList[0];
     const selectedToAcc = accountsList.find(a => a.id === form.toAccountId);
     const selectedMem = membersList.find(m => m.id === form.memberId) || (membersList.length > 0 ? membersList[0] : null);
-    const selectedBiz = businessesList.find(b => b.id === form.businessId);
+
+    let resolvedBiz = businessesList.find(b => b.id === form.businessId);
+    if (!resolvedBiz && selectedCat) {
+      resolvedBiz = businessesList.find(b => b.name.toLowerCase().trim() === selectedCat.name.toLowerCase().trim());
+    }
 
     onSave({
       id: initialData?.id,
@@ -218,11 +315,11 @@ function TransactionModal({
       currency: selectedAcc?.currency || "DOP",
       date: new Date(form.date + "T12:00:00"),
       status: form.status as any,
-      category: form.type === "transfer" ? null : (selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color || "#6366f1" } : null),
+      category: selectedCat ? { id: selectedCat.id, name: selectedCat.name, color: selectedCat.color || "#6366f1" } : null,
       account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : { name: "Principal" },
       toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
       member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
-      business: selectedBiz ? { id: selectedBiz.id, name: selectedBiz.name } : null,
+      business: resolvedBiz ? { id: resolvedBiz.id, name: resolvedBiz.name } : null,
       isRecurring: form.isRecurring,
       recurringFrequency: form.isRecurring ? form.recurringFrequency : undefined,
       attachmentUrl: form.attachmentUrl || null,
@@ -278,6 +375,29 @@ function TransactionModal({
               })}
             </div>
 
+            {/* Active Business Notification Banner */}
+            {activeBusiness && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  background: "var(--color-investment-dim)",
+                  border: "1px solid var(--border-subtle)",
+                  padding: "0.625rem 0.875rem",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--color-investment)",
+                  fontSize: "0.8125rem",
+                  fontWeight: 500,
+                }}
+              >
+                <Building2 size={16} style={{ flexShrink: 0 }} />
+                <span>
+                  Vinculado a la empresa <strong>{activeBusiness.name}</strong> ({activeBusiness.type || "Negocio"}). Impactará su flujo financiero y P&L.
+                </span>
+              </div>
+            )}
+
             {/* Amount */}
             <div className="form-group">
               <label className="label">Monto *</label>
@@ -302,7 +422,7 @@ function TransactionModal({
               <input
                 className="input"
                 required
-                placeholder="Ej: Supermercado, Salario quincenal, Gasolina..."
+                placeholder="Ej: Supermercado, Salario quincenal, Gasolina, Venta de producto..."
                 value={form.description}
                 onChange={e => set("description", e.target.value)}
               />
@@ -325,93 +445,232 @@ function TransactionModal({
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-              {/* Account */}
-              <div className="form-group">
-                <label className="label">
-                  <CreditCard size={12} style={{ display: "inline", marginRight: 4 }} />
-                  {form.type === "transfer" ? "Cuenta Origen *" : "Cuenta *"}
-                </label>
-                <select className="input" value={form.accountId} onChange={e => set("accountId", e.target.value)}>
-                  {accountsList.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* To Account (if transfer) or Category */}
-              {form.type === "transfer" ? (
-                <div className="form-group">
-                  <label className="label">
-                    <ArrowLeftRight size={12} style={{ display: "inline", marginRight: 4 }} />
-                    Cuenta Destino *
-                  </label>
-                  <select className="input" value={form.toAccountId} onChange={e => set("toAccountId", e.target.value)}>
-                    {accountsList.map(a => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
+            {/* Account and Category Selection */}
+            {form.type === "transfer" ? (
+              <>
+                {/* Transfer: Source and Target Accounts */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  <div className="form-group">
+                    <label className="label">
+                      <CreditCard size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Cuenta Origen *
+                    </label>
+                    <select className="input" value={form.accountId} onChange={e => set("accountId", e.target.value)}>
+                      {accountsList.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="label">
+                      <ArrowLeftRight size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Cuenta Destino *
+                    </label>
+                    <select className="input" value={form.toAccountId} onChange={e => set("toAccountId", e.target.value)}>
+                      {accountsList.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              ) : (
-                <div className="form-group">
-                  <label className="label">
-                    <Tag size={12} style={{ display: "inline", marginRight: 4 }} />
-                    Categoría
-                  </label>
-                  <select className="input" value={form.categoryId} onChange={e => set("categoryId", e.target.value)}>
-                    <option value="">Sin categoría</option>
-                    {filteredCategories.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-              {/* Member */}
-              <div className="form-group">
-                <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
-                <select
-                  className="input"
-                  value={form.memberId}
-                  onChange={e => {
-                    setMemberManuallySelected(true);
-                    set("memberId", e.target.value);
-                  }}
-                >
-                  {membersList.length === 0 ? (
-                    <option value="">Cargando integrantes del hogar...</option>
-                  ) : (
-                    membersList.map(m => (
-                      <option key={m.id} value={m.id}>
-                        {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
-                      </option>
-                    ))
+                {/* Transfer: Category and Business */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  <div className="form-group">
+                    <label className="label">
+                      <Tag size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Categoría (Opcional)
+                    </label>
+                    <select
+                      className="input"
+                      value={form.categoryId}
+                      onChange={e => handleCategoryChange(e.target.value)}
+                    >
+                      <option value="">Sin categoría</option>
+                      {businessCategories.length > 0 && (
+                        <optgroup label="🏢 Empresas y Negocios">
+                          {businessCategories.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} ({c.type === "income" ? "Entrada" : "Salida"})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {generalCategories.length > 0 && (
+                        <optgroup label="📂 Categorías Generales">
+                          {generalCategories.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="label">
+                      <Building2 size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Empresa / Negocio (Opcional)
+                    </label>
+                    <select
+                      className="input"
+                      value={form.businessId}
+                      onChange={e => handleBusinessChange(e.target.value)}
+                    >
+                      <option value="">(Ninguno - Finanzas Hogar)</option>
+                      {businessesList.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} {b.type ? `(${b.type})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Transfer: Member & Flow Direction */}
+                <div style={{ display: "grid", gridTemplateColumns: form.businessId ? "1fr 1fr" : "1fr", gap: "0.75rem" }}>
+                  <div className="form-group">
+                    <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
+                    <select
+                      className="input"
+                      value={form.memberId}
+                      onChange={e => {
+                        setMemberManuallySelected(true);
+                        set("memberId", e.target.value);
+                      }}
+                    >
+                      {membersList.length === 0 ? (
+                        <option value="">Cargando integrantes del hogar...</option>
+                      ) : (
+                        membersList.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {form.businessId && (
+                    <div className="form-group">
+                      <label className="label">Impacto en el Negocio</label>
+                      <select
+                        className="input"
+                        value={form.transferFlow}
+                        onChange={e => {
+                          const val = e.target.value as "income" | "expense";
+                          set("transferFlow", val);
+                          const biz = businessesList.find(b => b.id === form.businessId);
+                          if (biz) {
+                            const matchCat = categoriesList.find(
+                              c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && c.type === val
+                            );
+                            if (matchCat) set("categoryId", matchCat.id);
+                          }
+                        }}
+                      >
+                        <option value="expense">Flujo de Salida (Egreso / Pago / Costo)</option>
+                        <option value="income">Flujo de Entrada (Ingreso / Aporte / Cobro)</option>
+                      </select>
+                    </div>
                   )}
-                </select>
-              </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Income / Expense: Account and Category */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  <div className="form-group">
+                    <label className="label">
+                      <CreditCard size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Cuenta *
+                    </label>
+                    <select className="input" value={form.accountId} onChange={e => set("accountId", e.target.value)}>
+                      {accountsList.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Business / Empresa */}
-              <div className="form-group">
-                <label className="label">
-                  <Building2 size={12} style={{ display: "inline", marginRight: 4 }} />
-                  Empresa / Negocio (Opcional)
-                </label>
-                <select
-                  className="input"
-                  value={form.businessId}
-                  onChange={e => set("businessId", e.target.value)}
-                >
-                  <option value="">(Ninguno - Finanzas Hogar)</option>
-                  {businessesList.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} {b.type ? `(${b.type})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+                  <div className="form-group">
+                    <label className="label">
+                      <Tag size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Categoría
+                    </label>
+                    <select
+                      className="input"
+                      value={form.categoryId}
+                      onChange={e => handleCategoryChange(e.target.value)}
+                    >
+                      <option value="">Sin categoría</option>
+                      {businessCategories.length > 0 && (
+                        <optgroup label="🏢 Empresas y Negocios">
+                          {businessCategories.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {generalCategories.length > 0 && (
+                        <optgroup label="📂 Categorías del Hogar">
+                          {generalCategories.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Income / Expense: Member and Business */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  <div className="form-group">
+                    <label className="label"><User size={12} style={{ display: "inline", marginRight: 4 }} />Integrante Responsable</label>
+                    <select
+                      className="input"
+                      value={form.memberId}
+                      onChange={e => {
+                        setMemberManuallySelected(true);
+                        set("memberId", e.target.value);
+                      }}
+                    >
+                      {membersList.length === 0 ? (
+                        <option value="">Cargando integrantes del hogar...</option>
+                      ) : (
+                        membersList.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="label">
+                      <Building2 size={12} style={{ display: "inline", marginRight: 4 }} />
+                      Empresa / Negocio (Opcional)
+                    </label>
+                    <select
+                      className="input"
+                      value={form.businessId}
+                      onChange={e => handleBusinessChange(e.target.value)}
+                    >
+                      <option value="">(Ninguno - Finanzas Hogar)</option>
+                      {businessesList.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} {b.type ? `(${b.type})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Recurring Section */}
             <div style={{ background: "var(--surface-2)", padding: "0.875rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
@@ -564,22 +823,33 @@ export function TransactionsClient() {
       }
       if (txs) {
         setTransactionsList(
-          txs.map((t: any) => ({
-            id: t.id,
-            description: t.description,
-            type: t.type as any,
-            amount: String(t.amount),
-            currency: t.currency || "DOP",
-            date: new Date(t.date),
-            status: t.status as any,
-            category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
-            account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
-            toAccount: t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null,
-            member: t.member ? { id: t.member.id, displayName: formatMemberName(t.member.displayName) } : null,
-            business: t.business ? { id: t.business.id, name: t.business.name } : null,
-            isRecurring: t.isRecurring,
-            notes: t.notes,
-          }))
+          txs.map((t: any) => {
+            let bizObj = t.business ? { id: t.business.id, name: t.business.name } : null;
+            if (!bizObj && t.category && bizs) {
+              const matchBiz = bizs.find(
+                (b: any) => b.name.toLowerCase().trim() === t.category.name.toLowerCase().trim()
+              );
+              if (matchBiz) {
+                bizObj = { id: matchBiz.id, name: matchBiz.name };
+              }
+            }
+            return {
+              id: t.id,
+              description: t.description,
+              type: t.type as any,
+              amount: String(t.amount),
+              currency: t.currency || "DOP",
+              date: new Date(t.date),
+              status: t.status as any,
+              category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
+              account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
+              toAccount: t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null,
+              member: t.member ? { id: t.member.id, displayName: formatMemberName(t.member.displayName) } : null,
+              business: bizObj,
+              isRecurring: t.isRecurring,
+              notes: t.notes,
+            };
+          })
         );
       }
     }).catch(err => console.error("Error loading transactions:", err));
@@ -624,7 +894,7 @@ export function TransactionsClient() {
       const matchBusiness =
         filterBusiness === "all" ||
         (filterBusiness === "none" && !tx.business) ||
-        (tx.business && tx.business.id === filterBusiness);
+        (tx.business && (tx.business.id === filterBusiness || (businessesList.find(b => b.id === filterBusiness)?.name.toLowerCase().trim() === tx.category?.name?.toLowerCase().trim())));
       const matchStatus = filterStatus === "all" || tx.status === filterStatus;
 
       let matchDate = true;
@@ -639,7 +909,7 @@ export function TransactionsClient() {
 
       return matchSearch && matchType && matchAccount && matchCategory && matchBusiness && matchStatus && matchDate;
     });
-  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterBusiness, filterStatus, datePreset]);
+  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterBusiness, businessesList, filterStatus, datePreset]);
 
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
@@ -659,6 +929,12 @@ export function TransactionsClient() {
 
   const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
     try {
+      let resolvedBiz = saved.business;
+      if (!resolvedBiz && saved.category?.name && businessesList.length > 0) {
+        const match = businessesList.find(b => b.name.toLowerCase().trim() === saved.category?.name.toLowerCase().trim());
+        if (match) resolvedBiz = { id: match.id, name: match.name };
+      }
+
       if (saved.id) {
         const res = await updateTransaction(saved.id, {
           description: saved.description,
@@ -668,14 +944,14 @@ export function TransactionsClient() {
           categoryId: saved.category?.id || undefined,
           accountId: saved.account?.id || undefined,
           memberId: saved.member?.id || undefined,
-          businessId: saved.business?.id || undefined,
+          businessId: resolvedBiz?.id || undefined,
           date: saved.date ? saved.date.toISOString() : undefined,
         });
         if (res && !res.success) {
           toast.error(res.error || "Error al actualizar la transacción");
           return;
         }
-        setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved } as TransactionItem : t));
+        setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved, business: resolvedBiz || null } as TransactionItem : t));
         toast.success("Transacción actualizada exitosamente");
       } else {
         const res = await createTransaction({
@@ -686,7 +962,7 @@ export function TransactionsClient() {
           toAccountId: saved.toAccount?.id || undefined,
           categoryId: saved.category?.id || undefined,
           memberId: saved.member?.id || undefined,
-          businessId: saved.business?.id || undefined,
+          businessId: resolvedBiz?.id || undefined,
           date: saved.date ? saved.date.toISOString() : new Date().toISOString(),
           status: saved.status || "cleared",
           isRecurring: Boolean(saved.isRecurring),
@@ -708,7 +984,7 @@ export function TransactionsClient() {
           account: saved.account || { name: "Principal" },
           toAccount: saved.toAccount || null,
           member: saved.member || null,
-          business: saved.business || null,
+          business: resolvedBiz || null,
           isRecurring: created.isRecurring,
           notes: saved.notes || undefined,
         };
