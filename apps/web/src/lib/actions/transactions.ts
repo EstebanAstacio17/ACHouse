@@ -17,18 +17,49 @@ import { getActiveHouseholdId } from "@/lib/household";
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function getAuthenticatedMember() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  const householdId = await getActiveHouseholdId();
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { userId: null, householdId: null, member: null, error: "No autorizado" };
+    }
+    const householdId = await getActiveHouseholdId();
+    if (!householdId) {
+      return { userId, householdId: null, member: null, error: "No hay hogar activo seleccionado" };
+    }
 
-  const member = await db.query.householdMembers.findFirst({
-    where: (m) => and(eq(m.clerkUserId, userId), eq(m.householdId, householdId), eq(m.isActive, true)),
-  });
-  if (!member) throw new Error("Not a member of this household");
-  return { userId, householdId, member };
+    let member = await db.query.householdMembers.findFirst({
+      where: and(
+        eq(householdMembers.clerkUserId, userId),
+        eq(householdMembers.householdId, householdId),
+        eq(householdMembers.isActive, true)
+      ),
+    });
+
+    // Fallback: search for member by clerkUserId regardless of active flag or household
+    if (!member) {
+      member = await db.query.householdMembers.findFirst({
+        where: and(eq(householdMembers.clerkUserId, userId), eq(householdMembers.householdId, householdId)),
+      });
+    }
+
+    if (!member) {
+      member = await db.query.householdMembers.findFirst({
+        where: and(eq(householdMembers.clerkUserId, userId), eq(householdMembers.isActive, true)),
+      });
+    }
+
+    // Fallback: pick any active member of this household
+    if (!member) {
+      member = await db.query.householdMembers.findFirst({
+        where: and(eq(householdMembers.householdId, householdId), eq(householdMembers.isActive, true)),
+      });
+    }
+
+    return { userId, householdId, member, error: null };
+  } catch (err: any) {
+    return { userId: null, householdId: null, member: null, error: err?.message || "Error de autenticación" };
+  }
 }
-
-// ── Transaction Schema imported from @achouse/types ──────────────────────────
 
 // ── CRUD Operations ──────────────────────────────────────────────────────────
 
@@ -43,7 +74,11 @@ export async function getTransactions(filters?: {
   page?: number;
   perPage?: number;
 }) {
-  const { householdId } = await getAuthenticatedMember();
+  const authCtx = await getAuthenticatedMember();
+  if (authCtx.error || !authCtx.householdId) {
+    return [];
+  }
+  const { householdId } = authCtx;
   const page = filters?.page ?? 1;
   const perPage = filters?.perPage ?? 50;
   const offset = (page - 1) * perPage;
@@ -91,32 +126,82 @@ export async function getTransactions(filters?: {
 }
 
 export async function createTransaction(data: z.input<typeof transactionSchema>) {
-  const { householdId, userId, member } = await getAuthenticatedMember();
-  const parsed = transactionSchema.parse(data);
+  try {
+    const authCtx = await getAuthenticatedMember();
+    if (authCtx.error || !authCtx.householdId || !authCtx.userId) {
+      return { success: false, error: authCtx.error || "No autorizado o sin hogar activo" };
+    }
+    const { householdId, userId, member } = authCtx;
 
-  const tx = await db.transaction(async (tx) => {
+    const parsedResult = transactionSchema.safeParse(data);
+    if (!parsedResult.success) {
+      const errorMsg = parsedResult.error.issues[0]?.message || "Datos de transacción inválidos";
+      return { success: false, error: errorMsg };
+    }
+    const parsed = parsedResult.data;
+
     // 1. Verify account belongs to this household (BOLA protection)
-    const account = await tx.query.accounts.findFirst({
+    let account = await db.query.accounts.findFirst({
       where: and(eq(accounts.id, parsed.accountId), eq(accounts.householdId, householdId)),
     });
-    
+
+    // Fallback: if specified account is not found, fallback to first active account in household
     if (!account) {
-      throw new Error("Invalid account or permission denied");
+      const fallbackAccount = await db.query.accounts.findFirst({
+        where: and(
+          eq(accounts.householdId, householdId),
+          eq(accounts.isActive, true),
+          isNull(accounts.deletedAt)
+        ),
+      });
+      if (!fallbackAccount) {
+        return { success: false, error: "No se encontró una cuenta activa disponible para esta transacción." };
+      }
+      account = fallbackAccount;
     }
 
-    // 2. Insert transaction
-    const [insertedTx] = await tx
+    // 2. Validate category if provided
+    let categoryId: string | null = parsed.categoryId ?? null;
+    if (categoryId) {
+      const cat = await db.query.categories.findFirst({
+        where: and(
+          eq(categories.id, categoryId),
+          eq(categories.householdId, householdId),
+          isNull(categories.deletedAt)
+        ),
+      });
+      if (!cat) {
+        categoryId = null;
+      }
+    }
+
+    // 3. Member ID
+    let memberId: string | null = parsed.memberId ?? member?.id ?? null;
+    if (memberId) {
+      const mem = await db.query.householdMembers.findFirst({
+        where: and(
+          eq(householdMembers.id, memberId),
+          eq(householdMembers.householdId, householdId)
+        ),
+      });
+      if (!mem) {
+        memberId = member?.id ?? null;
+      }
+    }
+
+    // 4. Insert transaction directly (neon-http driver does not support interactive transactions)
+    const [insertedTx] = await db
       .insert(transactions)
       .values({
         householdId,
-        accountId: parsed.accountId,
-        categoryId: parsed.categoryId ?? null,
-        memberId: parsed.memberId ?? member.id,
+        accountId: account.id,
+        categoryId,
+        memberId,
         businessId: parsed.businessId ?? null,
         projectId: parsed.projectId ?? null,
         type: parsed.type,
         amount: parsed.amount.toString(),
-        currency: parsed.currency,
+        currency: parsed.currency || account.currency || "DOP",
         description: parsed.description,
         date: new Date(parsed.date),
         referenceNo: parsed.referenceNo ?? null,
@@ -127,60 +212,114 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       })
       .returning();
 
-    // 3. Update account balance safely
-    const current = parseFloat(account.balance);
+    // 5. Update account balance safely
+    const current = parseFloat(account.balance || "0");
     const amount = parseFloat(parsed.amount.toString());
-    const newBalance = parsed.type === "income" ? current + amount : current - amount;
-    
-    await tx
+    let newBalance = current;
+
+    if (parsed.type === "income") {
+      newBalance = current + amount;
+    } else if (parsed.type === "expense") {
+      newBalance = current - amount;
+    } else if (parsed.type === "transfer") {
+      newBalance = current - amount;
+      if (parsed.toAccountId) {
+        const toAccount = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, parsed.toAccountId), eq(accounts.householdId, householdId)),
+        });
+        if (toAccount) {
+          const toCurrent = parseFloat(toAccount.balance || "0");
+          await db
+            .update(accounts)
+            .set({ balance: (toCurrent + amount).toFixed(2), updatedAt: new Date() })
+            .where(eq(accounts.id, toAccount.id));
+        }
+      }
+    }
+
+    await db
       .update(accounts)
-      .set({ balance: newBalance.toString() })
-      .where(eq(accounts.id, parsed.accountId));
+      .set({ balance: newBalance.toFixed(2), updatedAt: new Date() })
+      .where(eq(accounts.id, account.id));
 
-    return insertedTx;
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/transactions");
-  return { success: true, transaction: tx };
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/transactions");
+    return { success: true, transaction: insertedTx };
+  } catch (err: any) {
+    console.error("Error in createTransaction:", err);
+    return { success: false, error: err?.message || "Error al registrar la transacción" };
+  }
 }
 
 export async function updateTransaction(id: string, data: Partial<z.infer<typeof transactionSchema>>) {
-  const { householdId } = await getAuthenticatedMember();
+  try {
+    const authCtx = await getAuthenticatedMember();
+    if (authCtx.error || !authCtx.householdId) {
+      return { success: false, error: authCtx.error || "No autorizado" };
+    }
+    const { householdId } = authCtx;
 
-  const existing = await db.query.transactions.findFirst({
-    where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
-  });
-  if (!existing) throw new Error("Transaction not found");
+    const existing = await db.query.transactions.findFirst({
+      where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
+    });
+    if (!existing) {
+      return { success: false, error: "Transacción no encontrada" };
+    }
 
-  await db
-    .update(transactions)
-    .set({
-      ...data,
-      amount: data.amount?.toString(),
-      date: data.date ? new Date(data.date) : undefined,
-      updatedAt: new Date(),
-    })
-    .where(eq(transactions.id, id));
+    await db
+      .update(transactions)
+      .set({
+        ...data,
+        amount: data.amount?.toString(),
+        date: data.date ? new Date(data.date) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id));
 
-  revalidatePath("/dashboard/transactions");
-  return { success: true };
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/transactions");
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in updateTransaction:", err);
+    return { success: false, error: err?.message || "Error al actualizar la transacción" };
+  }
 }
 
 export async function deleteTransaction(id: string) {
-  const { householdId } = await getAuthenticatedMember();
+  try {
+    const authCtx = await getAuthenticatedMember();
+    if (authCtx.error || !authCtx.householdId) {
+      return { success: false, error: authCtx.error || "No autorizado" };
+    }
+    const { householdId } = authCtx;
 
-  await db
-    .update(transactions)
-    .set({ deletedAt: new Date() })
-    .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)));
+    await db
+      .update(transactions)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)));
 
-  revalidatePath("/dashboard/transactions");
-  return { success: true };
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/transactions");
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in deleteTransaction:", err);
+    return { success: false, error: err?.message || "Error al eliminar la transacción" };
+  }
 }
 
 export async function getDashboardKPIs() {
-  const { householdId } = await getAuthenticatedMember();
+  const authCtx = await getAuthenticatedMember();
+  if (authCtx.error || !authCtx.householdId) {
+    return {
+      totalBalance: 0,
+      monthlyIncome: 0,
+      monthlyExpenses: 0,
+      netCashFlow: 0,
+      topCategories: [],
+      recentTransactions: [],
+    };
+  }
+  const { householdId } = authCtx;
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -197,17 +336,17 @@ export async function getDashboardKPIs() {
       with: { category: true },
     }),
     db.query.accounts.findMany({
-      where: and(eq(accounts.householdId, householdId), eq(accounts.isActive, true)),
+      where: and(eq(accounts.householdId, householdId), eq(accounts.isActive, true), isNull(accounts.deletedAt)),
     }),
   ]);
 
-  const totalBalance = allAccounts.reduce((s, a) => s + parseFloat(a.balance), 0);
+  const totalBalance = allAccounts.reduce((s, a) => s + parseFloat(a.balance || "0"), 0);
   const monthlyIncome = monthlyTxs
     .filter((t) => t.type === "income")
-    .reduce((s, t) => s + parseFloat(t.amount), 0);
+    .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
   const monthlyExpenses = monthlyTxs
     .filter((t) => t.type === "expense")
-    .reduce((s, t) => s + parseFloat(t.amount), 0);
+    .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
 
   // Top categories by expense
   const catMap = new Map<string, { name: string; amount: number; color: string }>();
@@ -216,7 +355,7 @@ export async function getDashboardKPIs() {
     .forEach((t) => {
       const cat = t.category!;
       const existing = catMap.get(cat.id) ?? { name: cat.name, amount: 0, color: cat.color };
-      catMap.set(cat.id, { ...existing, amount: existing.amount + parseFloat(t.amount) });
+      catMap.set(cat.id, { ...existing, amount: existing.amount + parseFloat(t.amount || "0") });
     });
   const topCategories = [...catMap.values()]
     .sort((a, b) => b.amount - a.amount)

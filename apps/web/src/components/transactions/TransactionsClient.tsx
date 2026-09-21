@@ -149,6 +149,7 @@ function TransactionModal({
     }
   }, [membersList, form.memberId, currentMemberId, initialData, memberManuallySelected]);
 
+  const toast = useToast();
   const [fileName, setFileName] = useState<string>("");
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -186,18 +187,28 @@ function TransactionModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.amount || !form.description) return;
+    const cleanDesc = (form.description || "").trim();
+    if (!cleanDesc) {
+      toast.error("Por favor ingresa una descripción para la transacción");
+      return;
+    }
+
+    const amountNum = parseFloat(form.amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error("El monto debe ser un valor numérico mayor a 0");
+      return;
+    }
 
     const selectedCat = categoriesList.find(c => c.id === form.categoryId);
-    const selectedAcc = accountsList.find(a => a.id === form.accountId);
+    const selectedAcc = accountsList.find(a => a.id === form.accountId) || accountsList[0];
     const selectedToAcc = accountsList.find(a => a.id === form.toAccountId);
     const selectedMem = membersList.find(m => m.id === form.memberId) || (membersList.length > 0 ? membersList[0] : null);
 
     onSave({
       id: initialData?.id,
-      description: form.description,
+      description: cleanDesc,
       type: form.type as any,
-      amount: parseFloat(form.amount).toFixed(2),
+      amount: amountNum.toFixed(2),
       currency: selectedAcc?.currency || "DOP",
       date: new Date(form.date + "T12:00:00"),
       status: form.status as any,
@@ -608,7 +619,7 @@ export function TransactionsClient() {
   const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
     try {
       if (saved.id) {
-        await updateTransaction(saved.id, {
+        const res = await updateTransaction(saved.id, {
           description: saved.description,
           amount: saved.amount !== undefined ? parseFloat(saved.amount) : undefined,
           type: saved.type,
@@ -618,6 +629,10 @@ export function TransactionsClient() {
           memberId: saved.member?.id || undefined,
           date: saved.date ? saved.date.toISOString() : undefined,
         });
+        if (res && !res.success) {
+          toast.error(res.error || "Error al actualizar la transacción");
+          return;
+        }
         setTransactionsList(prev => prev.map(t => t.id === saved.id ? { ...t, ...saved } as TransactionItem : t));
         toast.success("Transacción actualizada exitosamente");
       } else {
@@ -633,6 +648,10 @@ export function TransactionsClient() {
           status: saved.status || "cleared",
           isRecurring: Boolean(saved.isRecurring),
         });
+        if (!res || !res.success || !res.transaction) {
+          toast.error(res?.error || "Error al registrar la transacción");
+          return;
+        }
         const created = res.transaction;
         const newTx: TransactionItem = {
           id: created.id,
@@ -650,7 +669,7 @@ export function TransactionsClient() {
           notes: saved.notes || undefined,
         };
         setTransactionsList(prev => [newTx, ...prev]);
-        toast.success("Transacción registrada en la base de datos");
+        toast.success("Transacción registrada exitosamente");
       }
     } catch (err: any) {
       toast.error(err?.message || "Error al registrar la transacción");

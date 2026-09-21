@@ -763,13 +763,16 @@ export function LoansClient() {
       });
 
       if (accountId) {
-        await createTransaction({
+        const txRes = await createTransaction({
           accountId,
           type: "expense",
           amount,
           description: "Pago cuota de préstamo",
           date: new Date().toISOString().split("T")[0],
         });
+        if (txRes && !txRes.success) {
+          throw new Error(txRes.error || "Error al registrar la transacción del préstamo");
+        }
       }
 
       toast.success(`Abono de $${amount.toFixed(2)} registrado al préstamo`);
@@ -782,13 +785,16 @@ export function LoansClient() {
   const handlePayCard = async (cardId: string, amount: number, accountId: string) => {
     try {
       if (accountId) {
-        await createTransaction({
+        const txRes = await createTransaction({
           accountId,
           type: "expense",
           amount,
           description: "Pago a tarjeta de crédito",
           date: new Date().toISOString().split("T")[0],
         });
+        if (txRes && !txRes.success) {
+          throw new Error(txRes.error || "Error al registrar la transacción de tarjeta");
+        }
       }
 
       const card = cards.find(c => c.id === cardId);
