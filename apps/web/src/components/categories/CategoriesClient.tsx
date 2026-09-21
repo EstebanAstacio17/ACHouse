@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Plus, Tag, ChevronRight, Pencil, Trash2, X, Check, Layers } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
-import { getCategories, createCategory, deleteCategory } from "@/lib/actions/entities";
+import { getCategories, createCategory, updateCategory, deleteCategory } from "@/lib/actions/entities";
 import { CategoryIcon, POPULAR_CATEGORY_ICONS } from "./CategoryIcon";
 
 export interface CategoryChild {
@@ -26,12 +26,10 @@ export interface CategoryItem {
 }
 
 const COLORS = [
-  "#1A73E8", "#4285F4",
-  "#1E8E3E", "#34A853",
-  "#D93025", "#EA4335",
-  "#F29900", "#FBBC05",
-  "#E65100", "#FF9800",
-  "#8E24AA", "#BA68C8",
+  "#6366f1", "#8b5cf6", "#ec4899", "#e11d48",
+  "#f97316", "#f59e0b", "#10b981", "#14b8a6",
+  "#06b6d4", "#3b82f6", "#1A73E8", "#64748b",
+  "#84cc16", "#22c55e", "#8E24AA", "#EA4335",
 ];
 
 const INITIAL_CATEGORIES: CategoryItem[] = [];
@@ -43,7 +41,7 @@ function CategoryModal({
   initialData,
 }: {
   onClose: () => void;
-  onSave: (cat: { name: string; type: "income" | "expense"; color: string; icon: string; parentId?: string | null }) => void;
+  onSave: (cat: { id?: string; name: string; type: "income" | "expense"; color: string; icon: string; parentId?: string | null }) => void;
   parent?: CategoryItem;
   initialData?: CategoryItem | CategoryChild | null;
 }) {
@@ -60,14 +58,17 @@ function CategoryModal({
     e.preventDefault();
     if (!form.name.trim()) return;
     onSave({
+      id: initialData?.id,
       name: form.name.trim(),
       type: form.type,
       color: selectedColor,
       icon: form.icon || "tag",
-      parentId: parent?.id ?? null,
+      parentId: parent?.id ?? (initialData && "parentId" in initialData ? (initialData as any).parentId : null),
     });
     onClose();
   };
+
+  const isSubcategory = Boolean(parent || (initialData && "parentId" in initialData && (initialData as any).parentId));
 
   return (
     <div
@@ -75,16 +76,18 @@ function CategoryModal({
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div className="modal" style={{ width: "min(460px, 95vw)" }}>
+      <div className="modal" style={{ width: "min(480px, 95vw)" }}>
         <div className="modal-header">
           <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>
-            {parent ? `Subcategoría de "${parent.name}"` : initialData ? "Editar Categoría" : "Nueva Categoría"}
+            {initialData
+              ? (isSubcategory ? (parent ? `Editar Subcategoría de "${parent.name}"` : "Editar Subcategoría") : "Editar Categoría")
+              : (parent ? `Subcategoría de "${parent.name}"` : "Nueva Categoría")}
           </h2>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {!parent && !initialData && (
+            {!isSubcategory && (
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 {(["expense", "income"] as const).map(t => (
                   <button
@@ -123,8 +126,8 @@ function CategoryModal({
 
             <div className="form-group">
               <label className="label">Ícono</label>
-              <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-                {POPULAR_CATEGORY_ICONS.slice(0, 14).map(item => {
+              <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", marginBottom: "0.5rem", maxHeight: "150px", overflowY: "auto", padding: "2px" }}>
+                {POPULAR_CATEGORY_ICONS.map(item => {
                   const isSelected = form.icon === item.id;
                   return (
                     <button
@@ -144,6 +147,7 @@ function CategoryModal({
                         alignItems: "center",
                         justifyContent: "center",
                         transition: "all 0.15s",
+                        flexShrink: 0,
                       }}
                     >
                       <item.icon size={16} />
@@ -163,7 +167,7 @@ function CategoryModal({
 
             <div className="form-group">
               <label className="label">Color de distintivo</label>
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
                 {COLORS.map(c => (
                   <button
                     type="button"
@@ -182,6 +186,36 @@ function CategoryModal({
                     }}
                   />
                 ))}
+                <label
+                  title="Color personalizado"
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px dashed var(--border-default)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    position: "relative",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                  }}
+                >
+                  <input
+                    type="color"
+                    value={selectedColor}
+                    onChange={e => { setSelectedColor(e.target.value); set("color", e.target.value); }}
+                    style={{
+                      position: "absolute",
+                      opacity: 0,
+                      width: "100%",
+                      height: "100%",
+                      cursor: "pointer",
+                    }}
+                  />
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>🎨</span>
+                </label>
               </div>
             </div>
 
@@ -215,7 +249,7 @@ function CategoryModal({
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn btn-primary">
-              <Check size={15} /> Guardar Categoría
+              <Check size={15} /> {initialData ? "Guardar Cambios" : "Guardar Categoría"}
             </button>
           </div>
         </form>
@@ -279,48 +313,121 @@ export function CategoriesClient() {
     setShowModal(true);
   };
 
-  const handleSaveCategory = async (catData: { name: string; type: "income" | "expense"; color: string; icon: string; parentId?: string | null }) => {
-    try {
-      const res = await createCategory({
-        name: catData.name,
-        type: catData.type,
-        color: catData.color,
-        icon: catData.icon,
-        parentId: catData.parentId ?? null,
-      });
-      const created = res.category;
+  const openEditModal = (item: CategoryItem | CategoryChild, parent?: CategoryItem) => {
+    setEditingItem(item);
+    setParentForModal(parent);
+    setShowModal(true);
+  };
 
-      if (catData.parentId) {
-        setCategories(prev =>
-          prev.map(p => {
-            if (p.id === catData.parentId) {
-              const newChild: CategoryChild = {
-                id: created.id,
-                name: created.name,
-                type: created.type as any,
-                color: created.color,
-                icon: created.icon,
-                parentId: catData.parentId!,
-              };
-              return { ...p, children: [...p.children, newChild] };
-            }
-            return p;
-          })
-        );
-        setExpanded(s => new Set(s).add(catData.parentId!));
-        toast.success(`Subcategoría "${catData.name}" añadida`);
+  const handleSaveCategory = async (catData: {
+    id?: string;
+    name: string;
+    type: "income" | "expense";
+    color: string;
+    icon: string;
+    parentId?: string | null;
+  }) => {
+    try {
+      if (catData.id) {
+        // Mode: EDIT
+        await updateCategory(catData.id, {
+          name: catData.name,
+          type: catData.type,
+          color: catData.color,
+          icon: catData.icon,
+          parentId: catData.parentId ?? null,
+        });
+
+        if (catData.parentId) {
+          // Subcategory edit
+          setCategories(prev =>
+            prev.map(p => {
+              if (p.id === catData.parentId) {
+                return {
+                  ...p,
+                  children: p.children.map(c =>
+                    c.id === catData.id
+                      ? {
+                          ...c,
+                          name: catData.name,
+                          type: catData.type,
+                          color: catData.color,
+                          icon: catData.icon,
+                        }
+                      : c
+                  ),
+                };
+              }
+              return p;
+            })
+          );
+          toast.success(`Subcategoría "${catData.name}" actualizada`);
+        } else {
+          // Parent category edit
+          setCategories(prev =>
+            prev.map(p => {
+              if (p.id === catData.id) {
+                return {
+                  ...p,
+                  name: catData.name,
+                  type: catData.type,
+                  color: catData.color,
+                  icon: catData.icon,
+                  // If type changed, cascade to children in UI
+                  children: p.children.map(c => ({
+                    ...c,
+                    type: catData.type,
+                  })),
+                };
+              }
+              return p;
+            })
+          );
+          toast.success(`Categoría "${catData.name}" actualizada`);
+        }
       } else {
-        const newCat: CategoryItem = {
-          id: created.id,
-          name: created.name,
-          type: created.type as any,
-          color: created.color,
-          icon: created.icon,
-          parentId: null,
-          children: [],
-        };
-        setCategories(prev => [newCat, ...prev]);
-        toast.success(`Categoría "${catData.name}" creada exitosamente`);
+        // Mode: CREATE
+        const res = await createCategory({
+          name: catData.name,
+          type: catData.type,
+          color: catData.color,
+          icon: catData.icon,
+          parentId: catData.parentId ?? null,
+        });
+        const created = res.category;
+
+        if (catData.parentId) {
+          setCategories(prev =>
+            prev.map(p => {
+              if (p.id === catData.parentId) {
+                const newChild: CategoryChild = {
+                  id: created.id,
+                  name: created.name,
+                  type: created.type as any,
+                  color: created.color,
+                  icon: created.icon,
+                  parentId: catData.parentId!,
+                };
+                return { ...p, children: [...p.children, newChild] };
+              }
+              return p;
+            })
+          );
+          setExpanded(s => new Set(s).add(catData.parentId!));
+          toast.success(`Subcategoría "${catData.name}" añadida`);
+        } else {
+          const newCat: CategoryItem = {
+            id: created.id,
+            name: created.name,
+            type: created.type as any,
+            color: created.color,
+            icon: created.icon,
+            parentId: null,
+            children: [],
+          };
+          setCategories(prev => [newCat, ...prev]);
+          toast.success(`Categoría "${catData.name}" creada exitosamente`);
+        }
       }
     } catch (err: any) {
       toast.error(err?.message || "Error al guardar categoría");
@@ -476,6 +583,13 @@ export function CategoriesClient() {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon btn-sm"
+                      onClick={() => openEditModal(cat)}
+                      title="Editar categoría"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
                       style={{ color: "var(--color-expense)" }}
                       onClick={() => handleDeleteCategory(cat.id, cat.name)}
                       title="Eliminar categoría"
@@ -529,6 +643,13 @@ export function CategoriesClient() {
                         <CategoryIcon icon={child.icon} size={16} color={cat.color} />
                       </div>
                       <span style={{ fontWeight: 600, fontSize: "0.875rem", flex: 1 }}>{child.name}</span>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        onClick={() => openEditModal(child, cat)}
+                        title="Editar subcategoría"
+                      >
+                        <Pencil size={13} />
+                      </button>
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
                         style={{ color: "var(--color-expense)" }}

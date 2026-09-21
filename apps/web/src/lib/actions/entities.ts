@@ -75,14 +75,35 @@ export async function createCategory(data: z.infer<typeof categorySchema>) {
 
 export async function updateCategory(id: string, data: Partial<z.infer<typeof categorySchema>>) {
   const { householdId } = await getAuthContext();
-  await db.update(categories).set(data).where(and(eq(categories.id, id), eq(categories.householdId, householdId)));
+  const [updated] = await db
+    .update(categories)
+    .set(data)
+    .where(and(eq(categories.id, id), eq(categories.householdId, householdId)))
+    .returning();
+
+  if (data.type && updated && !updated.parentId) {
+    await db
+      .update(categories)
+      .set({ type: data.type })
+      .where(and(eq(categories.parentId, id), eq(categories.householdId, householdId)));
+  }
+
   revalidatePath("/dashboard/categories");
-  return { success: true };
+  return { success: true, category: updated };
 }
 
 export async function deleteCategory(id: string) {
   const { householdId } = await getAuthContext();
-  await db.update(categories).set({ deletedAt: new Date(), isActive: false }).where(and(eq(categories.id, id), eq(categories.householdId, householdId)));
+  await db
+    .update(categories)
+    .set({ deletedAt: new Date(), isActive: false })
+    .where(and(eq(categories.id, id), eq(categories.householdId, householdId)));
+
+  await db
+    .update(categories)
+    .set({ deletedAt: new Date(), isActive: false })
+    .where(and(eq(categories.parentId, id), eq(categories.householdId, householdId)));
+
   revalidatePath("/dashboard/categories");
   return { success: true };
 }
@@ -254,6 +275,7 @@ export async function getMembers() {
         email,
         isPendingInvite,
         inviteToken,
+        isCurrentUser: m.clerkUserId === userId,
       };
     })
   );

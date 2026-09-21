@@ -49,15 +49,15 @@ const STATUS_CONFIG = {
 };
 
 const CATEGORIES_LIST = [
-  { id: "cat1", name: "Alimentación", color: "#6366f1" },
-  { id: "cat2", name: "Transporte", color: "#f97316" },
-  { id: "cat3", name: "Vivienda", color: "#8b5cf6" },
-  { id: "cat4", name: "Salud", color: "#06b6d4" },
-  { id: "cat5", name: "Entretenimiento", color: "#ec4899" },
-  { id: "cat6", name: "Salario", color: "#22c55e" },
-  { id: "cat7", name: "Negocios", color: "#14b8a6" },
-  { id: "cat8", name: "Deudas", color: "#f59e0b" },
-  { id: "cat9", name: "Servicios", color: "#84cc16" },
+  { id: "cat1", name: "Alimentación", color: "#6366f1", type: "expense" as const },
+  { id: "cat2", name: "Transporte", color: "#f97316", type: "expense" as const },
+  { id: "cat3", name: "Vivienda", color: "#8b5cf6", type: "expense" as const },
+  { id: "cat4", name: "Salud", color: "#06b6d4", type: "expense" as const },
+  { id: "cat5", name: "Entretenimiento", color: "#ec4899", type: "expense" as const },
+  { id: "cat6", name: "Salario", color: "#22c55e", type: "income" as const },
+  { id: "cat7", name: "Negocios", color: "#14b8a6", type: "income" as const },
+  { id: "cat8", name: "Deudas", color: "#f59e0b", type: "expense" as const },
+  { id: "cat9", name: "Servicios", color: "#84cc16", type: "expense" as const },
 ];
 
 const ACCOUNTS_LIST = [
@@ -81,23 +81,42 @@ function TransactionModal({
   categoriesList = [],
   accountsList = [],
   membersList = [],
+  currentMemberId,
 }: {
   onClose: () => void;
   onSave: (tx: Partial<TransactionItem>) => void;
   initialData?: TransactionItem | null;
-  categoriesList: Array<{ id: string; name: string; color?: string }>;
+  categoriesList: Array<{ id: string; name: string; color?: string; type?: "income" | "expense" }>;
   accountsList: Array<{ id: string; name: string; currency?: string }>;
-  membersList: Array<{ id: string; displayName: string }>;
+  membersList: Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>;
+  currentMemberId?: string;
 }) {
+  const initialType = (initialData?.type ?? "expense") as "income" | "expense" | "transfer";
+  const matchingInitialCats = categoriesList.filter(c => !c.type || c.type === initialType);
+  const defaultCatId = initialData?.category?.id || (matchingInitialCats.find(c => c.name === initialData?.category?.name)?.id ?? (matchingInitialCats[0]?.id || ""));
+
+  const initialMemberId = useMemo(() => {
+    if (initialData?.member?.id) return initialData.member.id;
+    if (initialData?.member?.displayName) {
+      const match = membersList.find(m => m.displayName === initialData.member?.displayName);
+      if (match) return match.id;
+    }
+    // Nueva transacción: pre-seleccionar al usuario conectado
+    if (currentMemberId) return currentMemberId;
+    const currentM = membersList.find(m => m.isCurrentUser);
+    if (currentM) return currentM.id;
+    return membersList[0]?.id || "";
+  }, [initialData, currentMemberId, membersList]);
+
   const [form, setForm] = useState({
-    type: initialData?.type ?? "expense",
+    type: initialType,
     amount: initialData?.amount ?? "",
     description: initialData?.description ?? "",
     date: initialData ? format(initialData.date, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
-    categoryId: initialData?.category?.id || (categoriesList.find(c => c.name === initialData?.category?.name)?.id ?? (categoriesList[0]?.id || "")),
+    categoryId: defaultCatId,
     accountId: initialData?.account?.id || (accountsList.find(a => a.name === initialData?.account?.name)?.id ?? (accountsList[0]?.id || "")),
     toAccountId: initialData?.toAccount?.id || (accountsList[1]?.id || ""),
-    memberId: initialData?.member?.id || (membersList.find(m => m.displayName === initialData?.member?.displayName)?.id ?? (membersList[0]?.id || "")),
+    memberId: initialMemberId,
     status: initialData?.status ?? "cleared",
     isRecurring: initialData?.isRecurring ?? false,
     recurringFrequency: initialData?.recurringFrequency ?? "Mensual",
@@ -106,14 +125,38 @@ function TransactionModal({
   });
 
   useEffect(() => {
-    if (!form.memberId && membersList.length > 0) {
-      set("memberId", membersList[0].id);
+    if (!initialData && currentMemberId && form.memberId !== currentMemberId) {
+      set("memberId", currentMemberId);
+    } else if (!form.memberId && membersList.length > 0) {
+      const target = (currentMemberId && membersList.find(m => m.id === currentMemberId))
+        || membersList.find(m => m.isCurrentUser)
+        || membersList[0];
+      if (target) {
+        set("memberId", target.id);
+      }
     }
-  }, [membersList, form.memberId]);
+  }, [membersList, form.memberId, currentMemberId, initialData]);
 
   const [fileName, setFileName] = useState<string>("");
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleTypeChange = (newType: "income" | "expense" | "transfer") => {
+    setForm(prev => {
+      const matchingCats = categoriesList.filter(c => !c.type || c.type === newType);
+      const stillValid = matchingCats.some(c => c.id === prev.categoryId);
+      return {
+        ...prev,
+        type: newType,
+        categoryId: newType === "transfer" ? "" : (stillValid ? prev.categoryId : (matchingCats[0]?.id || "")),
+      };
+    });
+  };
+
+  const filteredCategories = useMemo(() => {
+    if (form.type === "transfer") return [];
+    return categoriesList.filter(c => !c.type || c.type === form.type);
+  }, [categoriesList, form.type]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,7 +223,7 @@ function TransactionModal({
                   <button
                     type="button"
                     key={t}
-                    onClick={() => set("type", t)}
+                    onClick={() => handleTypeChange(t)}
                     style={{
                       padding: "0.625rem",
                       borderRadius: "var(--radius-md)",
@@ -285,7 +328,7 @@ function TransactionModal({
                   </label>
                   <select className="input" value={form.categoryId} onChange={e => set("categoryId", e.target.value)}>
                     <option value="">Sin categoría</option>
-                    {categoriesList.map(c => (
+                    {filteredCategories.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -301,7 +344,9 @@ function TransactionModal({
                   <option value="">Cargando integrantes del hogar...</option>
                 ) : (
                   membersList.map(m => (
-                    <option key={m.id} value={m.id}>{m.displayName}</option>
+                    <option key={m.id} value={m.id}>
+                      {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+                    </option>
                   ))
                 )}
               </select>
@@ -369,8 +414,8 @@ export function TransactionsClient() {
   const { user } = useUser();
   const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
   const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
-  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string }>>([]);
-  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string; type?: "income" | "expense" }>>([]);
+  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
@@ -431,14 +476,22 @@ export function TransactionsClient() {
         setAccountsList(accs.map((a: any) => ({ id: a.id, name: a.name, currency: a.currency })));
       }
       if (cats) {
-        setCategoriesList(cats.map((c: any) => ({ id: c.id, name: c.name, color: c.color })));
+        setCategoriesList(cats.map((c: any) => ({ id: c.id, name: c.name, color: c.color, type: c.type })));
       }
       if (mems) {
         const resolved = getResolvedUserName();
         setMembersList(
           mems.map((m: any) => {
-            const name = isRoleName(m.displayName) && resolved ? resolved : (m.displayName || "Integrante");
-            return { id: m.id, displayName: name };
+            const isCurrent = Boolean(m.isCurrentUser || (user && m.clerkUserId === user.id));
+            const name = isRoleName(m.displayName) && isCurrent && resolved
+              ? resolved
+              : (m.displayName || "Integrante");
+            return {
+              id: m.id,
+              displayName: name,
+              clerkUserId: m.clerkUserId,
+              isCurrentUser: isCurrent,
+            };
           })
         );
       }
@@ -469,11 +522,24 @@ export function TransactionsClient() {
 
   useEffect(() => {
     const resolved = getResolvedUserName();
-    if (!resolved) return;
+    if (!resolved && !user) return;
     setMembersList(prev =>
-      prev.map(m => (isRoleName(m.displayName) ? { ...m, displayName: resolved } : m))
+      prev.map(m => {
+        const isCurrent = Boolean(m.isCurrentUser || (user && m.clerkUserId === user.id));
+        return {
+          ...m,
+          isCurrentUser: isCurrent,
+          displayName: isCurrent && isRoleName(m.displayName) && resolved ? resolved : m.displayName,
+        };
+      })
     );
   }, [user]);
+
+  const currentMember =
+    membersList.find(m => m.isCurrentUser) ||
+    (user && membersList.find(m => m.clerkUserId === user.id)) ||
+    (user && membersList.find(m => m.displayName.toLowerCase() === (user.fullName || "").toLowerCase()));
+  const currentMemberId = currentMember?.id;
 
   // Filter logic
   const filtered = useMemo(() => {
@@ -615,6 +681,7 @@ export function TransactionsClient() {
           categoriesList={categoriesList}
           accountsList={accountsList}
           membersList={membersList}
+          currentMemberId={currentMemberId}
         />
       )}
 

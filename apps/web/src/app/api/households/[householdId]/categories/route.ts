@@ -170,6 +170,13 @@ export async function PUT(
       .where(and(eq(categories.id, id), eq(categories.householdId, householdId)))
       .returning();
 
+    if (type && updated && !updated.parentId) {
+      await db
+        .update(categories)
+        .set({ type })
+        .where(and(eq(categories.parentId, id), eq(categories.householdId, householdId)));
+    }
+
     return NextResponse.json({ category: updated });
   } catch (error) {
     console.error("[PUT category]", error);
