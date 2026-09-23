@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import {
@@ -8,20 +8,22 @@ import {
   CreditCard, Calendar, CheckCircle2, X, Menu,
   Wallet, Users, FolderKanban, Tag, BarChart3,
   Settings, ArrowLeftRight, Building2, Landmark,
-  CheckCheck, AlertCircle, Sparkles,
+  CheckCheck, AlertCircle, Sparkles, ArrowUpCircle, ArrowDownCircle, Clock, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { PlatformNotification } from "@/lib/actions/notifications";
 
 interface HeaderProps {
   householdName?: string;
   onToggleMobileMenu?: () => void;
 }
 
-const INITIAL_NOTIFICATIONS: Array<{ id: string; title: string; message: string; time: string; type: "warning" | "info" | "success"; read: boolean }> = [];
+const READ_STORAGE_KEY = "achouse_read_notifications_v1";
 
 const SEARCH_ITEMS = [
   { label: "Dashboard General",                href: "/dashboard",              category: "Navegación",    icon: Home },
+  { label: "Centro de Notificaciones",         href: "/dashboard/notifications", category: "Navegación",   icon: Bell },
   { label: "Ver Transacciones",                href: "/dashboard/transactions", category: "Finanzas",      icon: ArrowLeftRight },
   { label: "Cuentas y Tarjetas",               href: "/dashboard/accounts",     category: "Finanzas",      icon: CreditCard },
   { label: "Integrantes y Roles",              href: "/dashboard/members",      category: "Organización",  icon: Users },
@@ -45,18 +47,66 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
   const [showSearch,       setShowSearch]       = useState(false);
   const [searchQuery,      setSearchQuery]      = useState("");
   const [showNotif,        setShowNotif]        = useState(false);
-  const [notifications,    setNotifications]    = useState(INITIAL_NOTIFICATIONS);
+  const [notifications,    setNotifications]    = useState<PlatformNotification[]>([]);
+  const [readIds,          setReadIds]          = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
   const notifRef  = useRef<HTMLDivElement>(null);
 
   const [householdsList, setHouseholdsList] = useState<Array<{ id: string; name: string; role?: string }>>([]);
   const [currentHouseholdName, setCurrentHouseholdName] = useState(householdName);
+  const [currentHouseholdId, setCurrentHouseholdId] = useState<string | null>(null);
   const [showHouseholdMenu, setShowHouseholdMenu] = useState(false);
   const householdMenuRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // Sync read notifications from localStorage
+  const loadReadStorage = useCallback(() => {
+    try {
+      const stored = localStorage.getItem(READ_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setReadIds(new Set(parsed));
+        }
+      }
+    } catch {}
+  }, []);
 
-  /* ── Fetch user households ── */
+  useEffect(() => {
+    loadReadStorage();
+    const handleStorageUpdate = () => loadReadStorage();
+    window.addEventListener("notifications_updated", handleStorageUpdate);
+    window.addEventListener("storage", handleStorageUpdate);
+    return () => {
+      window.removeEventListener("notifications_updated", handleStorageUpdate);
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, [loadReadStorage]);
+
+  const saveReadIds = (newSet: Set<string>) => {
+    setReadIds(newSet);
+    try {
+      localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(Array.from(newSet)));
+      window.dispatchEvent(new Event("notifications_updated"));
+    } catch {}
+  };
+
+  const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
+
+  /* ── Fetch user households & notifications ── */
+  const fetchNotifs = useCallback(async (hId?: string) => {
+    try {
+      const targetId = hId || currentHouseholdId;
+      if (!targetId) return;
+      const res = await fetch(`/api/households/${targetId}/notifications`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.notifications) {
+          setNotifications(data.notifications);
+        }
+      }
+    } catch {}
+  }, [currentHouseholdId]);
+
   useEffect(() => {
     fetch("/api/households")
       .then((res) => (res.ok ? res.json() : null))
@@ -66,16 +116,20 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
           const active = data.households.find((h: any) => h.id === data.activeHouseholdId) || data.households[0];
           if (active) {
             setCurrentHouseholdName(active.name);
+            setCurrentHouseholdId(active.id);
+            fetchNotifs(active.id);
           }
         }
       })
       .catch(() => {});
-  }, []);
+  }, [fetchNotifs]);
 
   const handleSelectHousehold = (h: { id: string; name: string }) => {
     document.cookie = `household_id=${h.id}; path=/; max-age=31536000; SameSite=Lax`;
     setCurrentHouseholdName(h.name);
+    setCurrentHouseholdId(h.id);
     setShowHouseholdMenu(false);
+    fetchNotifs(h.id);
     router.refresh();
   };
 
@@ -139,11 +193,17 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
     : SEARCH_ITEMS;
 
   /* ── Dismiss notification ── */
-  const markRead = (id: string) =>
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  const markRead = (id: string) => {
+    const newSet = new Set(readIds);
+    newSet.add(id);
+    saveReadIds(newSet);
+  };
 
-  const markAllRead = () =>
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const markAllRead = () => {
+    const newSet = new Set(readIds);
+    notifications.forEach(n => newSet.add(n.id));
+    saveReadIds(newSet);
+  };
 
   /* ─────────────────────────────────────────────────────────────────────── */
   return (
@@ -353,95 +413,139 @@ export function Header({ householdName = "Mi Hogar", onToggleMobileMenu }: Heade
               </div>
 
               {/* Notification list */}
-              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              <div style={{ maxHeight: 340, overflowY: "auto" }}>
                 {notifications.length === 0 ? (
                   <div style={{ padding: "2.5rem 1rem", textAlign: "center", color: "var(--text-secondary)", fontSize: "0.8125rem" }}>
                     <CheckCircle2 size={24} style={{ margin: "0 auto 0.5rem", opacity: 0.3 }} />
-                    <p style={{ fontWeight: 600 }}>No hay notificaciones pendientes</p>
-                    <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: 2 }}>Todo está al día</p>
+                    <p style={{ fontWeight: 600 }}>No hay notificaciones recientes</p>
+                    <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: 2 }}>Los movimientos y actualizaciones aparecerán aquí</p>
                   </div>
                 ) : (
-                  notifications.map(n => (
-                    <button
-                      key={n.id}
-                      onClick={() => markRead(n.id)}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "0.75rem",
-                        width: "100%",
-                        padding: "0.875rem 1.125rem",
-                        background: n.read ? "transparent" : "var(--bg-hover)",
-                        border: "none",
-                        borderBottom: "1px solid var(--border-hair)",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        transition: "background var(--transition-fast)",
-                      }}
-                    >
-                      <div style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        background: "var(--bg-active)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}>
-                        {NOTIF_ICON[n.type]}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                  notifications.slice(0, 10).map(n => {
+                    const isRead = readIds.has(n.id);
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => {
+                          markRead(n.id);
+                          setShowNotif(false);
+                          if (n.actionUrl) router.push(n.actionUrl);
+                          else router.push("/dashboard/notifications");
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "0.75rem",
+                          width: "100%",
+                          padding: "0.875rem 1.125rem",
+                          background: isRead ? "transparent" : "var(--bg-hover)",
+                          border: "none",
+                          borderBottom: "1px solid var(--border-hair)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "background var(--transition-fast)",
+                        }}
+                      >
                         <div style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 8,
+                          background: n.category === "system" ? "rgba(99,102,241,0.12)" : isRead ? "var(--bg-active)" : "var(--bg-hover)",
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: "0.5rem",
-                          marginBottom: "0.125rem",
+                          justifyContent: "center",
+                          flexShrink: 0,
                         }}>
-                          <span style={{
-                            fontSize: "0.8125rem",
-                            fontWeight: n.read ? 500 : 700,
-                            color: "var(--text-primary)",
-                            letterSpacing: "-0.01em",
-                          }}>
-                            {n.title}
-                          </span>
-                          {!n.read && (
-                            <span style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: "50%",
-                              background: "var(--accent)",
-                              flexShrink: 0,
-                            }} />
+                          {n.category === "system" ? (
+                            <Sparkles size={14} style={{ color: "var(--accent)" }} />
+                          ) : n.type === "income" ? (
+                            <ArrowUpCircle size={14} style={{ color: "var(--color-income)" }} />
+                          ) : n.type === "receivable" ? (
+                            <Clock size={14} style={{ color: "var(--color-warning)" }} />
+                          ) : n.type === "expense" ? (
+                            <ArrowDownCircle size={14} style={{ color: "var(--color-expense)" }} />
+                          ) : n.type === "transfer" ? (
+                            <ArrowLeftRight size={14} style={{ color: "var(--color-transfer)" }} />
+                          ) : (
+                            <Bell size={14} style={{ color: "var(--accent)" }} />
                           )}
                         </div>
-                        <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
-                          {n.message}
-                        </p>
-                        <span style={{ fontSize: "0.6875rem", color: "var(--text-tertiary)", marginTop: "0.25rem", display: "block" }}>
-                          {n.time}
-                        </span>
-                      </div>
-                    </button>
-                  ))
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.5rem",
+                            marginBottom: "0.125rem",
+                          }}>
+                            <span style={{
+                              fontSize: "0.8125rem",
+                              fontWeight: isRead ? 500 : 700,
+                              color: "var(--text-primary)",
+                              letterSpacing: "-0.01em",
+                            }}>
+                              {n.title}
+                            </span>
+                            {!isRead && (
+                              <span style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                background: "var(--accent)",
+                                flexShrink: 0,
+                              }} />
+                            )}
+                          </div>
+                          <p style={{
+                            fontSize: "0.75rem",
+                            color: isRead ? "var(--text-secondary)" : "var(--text-primary)",
+                            lineHeight: 1.35,
+                            margin: "0 0 0.25rem 0",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                          }}>
+                            {n.message}
+                          </p>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                            <span style={{ fontSize: "0.6875rem", color: "var(--text-tertiary)" }}>
+                              {n.relativeTime}
+                            </span>
+                            {n.amount && (
+                              <span style={{
+                                fontSize: "0.6875rem",
+                                fontWeight: 700,
+                                color: n.type === "income" ? "var(--color-income)" : n.type === "receivable" ? "var(--color-warning)" : "var(--color-expense)",
+                              }}>
+                                {n.amount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
                 )}
               </div>
 
               {/* Footer */}
-              <div style={{ padding: "0.75rem 1.125rem", borderTop: "1px solid var(--border-hair)" }}>
-                <button style={{
-                  background: "none",
-                  border: "none",
-                  fontSize: "0.75rem",
-                  color: "var(--text-tertiary)",
-                  cursor: "pointer",
-                  width: "100%",
-                  textAlign: "center",
-                }}>
-                  Ver todas las notificaciones
-                </button>
+              <div style={{ padding: "0.75rem 1.125rem", borderTop: "1px solid var(--border-hair)", background: "var(--bg-card)" }}>
+                <Link
+                  href="/dashboard/notifications"
+                  onClick={() => setShowNotif(false)}
+                  style={{
+                    display: "block",
+                    fontSize: "0.75rem",
+                    color: "var(--accent)",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    textAlign: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  Ver todas las notificaciones →
+                </Link>
               </div>
             </div>
           )}

@@ -17,6 +17,7 @@ import {
   Home,
   LogOut,
   User,
+  Bell,
 } from "lucide-react";
 import { useClerk } from "@clerk/nextjs";
 import { useToast } from "@/components/ui/ToastContext";
@@ -25,9 +26,10 @@ const navSections = [
   {
     label: "Principal",
     items: [
-      { href: "/dashboard",              icon: LayoutDashboard, label: "Dashboard" },
-      { href: "/dashboard/transactions", icon: ArrowLeftRight,  label: "Transacciones" },
-      { href: "/dashboard/accounts",     icon: CreditCard,      label: "Cuentas" },
+      { href: "/dashboard",               icon: LayoutDashboard, label: "Dashboard" },
+      { href: "/dashboard/transactions",  icon: ArrowLeftRight,  label: "Transacciones" },
+      { href: "/dashboard/accounts",      icon: CreditCard,      label: "Cuentas" },
+      { href: "/dashboard/notifications", icon: Bell,            label: "Notificaciones" },
     ],
   },
   {
