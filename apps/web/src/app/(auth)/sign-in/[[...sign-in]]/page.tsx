@@ -1,6 +1,6 @@
 import { SignIn } from "@clerk/nextjs";
 import Link from "next/link";
-import { Home, ArrowRight, Shield, CheckCircle2, KeyRound } from "lucide-react";
+import { Home, ArrowRight, Shield, ShieldAlert, CheckCircle2, Lock, Clock } from "lucide-react";
 
 const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 const hasValidClerkKey =
@@ -8,10 +8,94 @@ const hasValidClerkKey =
   !pubKey.includes("REEMPLAZAR") &&
   pubKey.length > 20;
 
-export default function SignInPage() {
+const REASON_MESSAGES: Record<string, { title: string; desc: string; icon: typeof ShieldAlert; color: string }> = {
+  inactivity: {
+    title: "Sesión cerrada por inactividad",
+    desc: "Por seguridad de tus datos bancarios y presupuestos familiares, tu sesión se cerró automáticamente tras un periodo de inactividad.",
+    icon: Clock,
+    color: "var(--color-warning)",
+  },
+  browser_restart: {
+    title: "Protección de cierre de navegador",
+    desc: "Has cerrado el navegador o reiniciado el equipo. Inicia sesión nuevamente para desbloquear el acceso a tu hogar.",
+    icon: Lock,
+    color: "var(--accent)",
+  },
+  max_lifetime: {
+    title: "Límite de sesión continua alcanzado",
+    desc: "Para mantener la máxima seguridad de tus registros financieros, se requiere verificar tu identidad periódicamente.",
+    icon: Shield,
+    color: "var(--color-income)",
+  },
+};
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ reason?: string }>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const reason = params?.reason;
+  const reasonInfo = reason && REASON_MESSAGES[reason] ? REASON_MESSAGES[reason] : null;
+
+  const ReasonBanner = reasonInfo ? (
+    <div
+      style={{
+        maxWidth: 440,
+        width: "100%",
+        marginBottom: "1.25rem",
+        padding: "1rem 1.25rem",
+        backgroundColor: "var(--bg-card)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-xl)",
+        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.3)",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "0.875rem",
+        animation: "fadeInUp 0.3s ease-out",
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          backgroundColor: "var(--bg-card-alt)",
+          border: `1px solid ${reasonInfo.color}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: reasonInfo.color,
+          flexShrink: 0,
+        }}
+      >
+        <reasonInfo.icon size={18} />
+      </div>
+      <div>
+        <h4 style={{ fontSize: "0.875rem", fontWeight: 700, margin: "0 0 0.2rem 0", color: "var(--text-primary)" }}>
+          {reasonInfo.title}
+        </h4>
+        <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", margin: 0, lineHeight: 1.45 }}>
+          {reasonInfo.desc}
+        </p>
+      </div>
+    </div>
+  ) : null;
+
   if (hasValidClerkKey) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.2), transparent 70%), var(--bg-base)", padding: "1.5rem" }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.2), transparent 70%), var(--bg-base)",
+          padding: "1.5rem",
+        }}
+      >
+        {ReasonBanner}
         <SignIn />
       </div>
     );
@@ -23,12 +107,14 @@ export default function SignInPage() {
       style={{
         minHeight: "100vh",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         background: "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.18), transparent 70%), var(--surface-0)",
         padding: "1.5rem",
       }}
     >
+      {ReasonBanner}
       <div
         className="card animate-fade-in-up"
         style={{
@@ -96,3 +182,4 @@ export default function SignInPage() {
     </div>
   );
 }
+

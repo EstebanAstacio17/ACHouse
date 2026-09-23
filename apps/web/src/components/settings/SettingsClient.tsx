@@ -3,18 +3,31 @@
 import { useState, useEffect } from "react";
 import {
   Home, Globe, Shield, Download, Trash2, Check, Moon, Sun,
-  Clock, AlertTriangle, FileJson, CheckCircle2, History, MapPin
+  Clock, AlertTriangle, FileJson, CheckCircle2, History, MapPin,
+  Lock, ShieldCheck, Timer, RefreshCw, LogOut, Laptop, BellRing
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
 import { COUNTRIES, CURRENCIES, TIMEZONES } from "@/lib/geo";
+import { useSessionSecurity } from "@/components/shared/SessionSecurityProvider";
 
 const INITIAL_AUDIT_LOGS: Array<{ id: string; action: string; entity: string; user: string; date: Date }> = [];
 
 export function SettingsClient() {
   const toast = useToast();
-  const [tab, setTab] = useState<"general" | "audit" | "backup">("general");
+  const [tab, setTab] = useState<"general" | "security" | "audit" | "backup">("general");
+  
+  // Session Security Context
+  const {
+    config: sessionConfig,
+    updateConfig: updateSessionConfig,
+    remainingSeconds,
+    extendSession,
+    lockSessionNow,
+    sessionStartTime,
+    lastActiveTime,
+  } = useSessionSecurity();
 
   // General Settings Form
   const [householdName, setHouseholdName] = useState("Mi Hogar");
@@ -23,6 +36,14 @@ export function SettingsClient() {
   const [timezone, setTimezone] = useState("America/Santo_Domingo");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  const formatSeconds = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    return `${mins}m ${secs < 10 ? "0" : ""}${secs}s`;
+  };
+
+
 
   useEffect(() => {
     fetch("/api/households")
@@ -139,7 +160,7 @@ export function SettingsClient() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "0.5rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "0.5rem", flexWrap: "wrap" }}>
         <button
           onClick={() => setTab("general")}
           className={`btn ${tab === "general" ? "btn-primary" : "btn-ghost"}`}
@@ -147,10 +168,16 @@ export function SettingsClient() {
           <Home size={16} /> Ajustes Generales
         </button>
         <button
+          onClick={() => setTab("security")}
+          className={`btn ${tab === "security" ? "btn-primary" : "btn-ghost"}`}
+        >
+          <ShieldCheck size={16} /> Seguridad & Sesión
+        </button>
+        <button
           onClick={() => setTab("audit")}
           className={`btn ${tab === "audit" ? "btn-primary" : "btn-ghost"}`}
         >
-          <Shield size={16} /> Auditoría & Seguridad
+          <History size={16} /> Auditoría
         </button>
         <button
           onClick={() => setTab("backup")}
@@ -291,7 +318,297 @@ export function SettingsClient() {
         </div>
       )}
 
-      {/* Tab 2: Audit Logs */}
+      {/* Tab 2: Security & Session Management */}
+      {tab === "security" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", maxWidth: 720 }}>
+          {/* Real-time Session Diagnostic Card */}
+          <div
+            className="card"
+            style={{
+              background: "linear-gradient(135deg, rgba(66, 133, 244, 0.08) 0%, rgba(34, 197, 94, 0.05) 100%)",
+              borderColor: "rgba(66, 133, 244, 0.25)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: "var(--radius-lg)",
+                    background: "var(--accent-subtle)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--accent)",
+                  }}
+                >
+                  <ShieldCheck size={24} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
+                    Estado de Seguridad de la Sesión
+                  </h3>
+                  <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: 0 }}>
+                    Monitoreo activo para la protección de tu información financiera
+                  </p>
+                </div>
+              </div>
+
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  padding: "0.25rem 0.75rem",
+                  borderRadius: 999,
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                  background: "rgba(34, 197, 94, 0.12)",
+                  color: "var(--color-income)",
+                  border: "1px solid rgba(34, 197, 94, 0.3)",
+                }}
+              >
+                <CheckCircle2 size={13} /> Sesión Protegida
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "0.75rem", marginTop: "0.5rem" }}>
+              <div style={{ padding: "0.75rem", backgroundColor: "var(--bg-card)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  <Timer size={13} color="var(--accent)" /> Tiempo Restante
+                </div>
+                <div style={{ fontSize: "1.25rem", fontWeight: 800, fontFamily: "monospace", color: remainingSeconds <= 60 ? "var(--color-expense)" : "var(--accent)", marginTop: "0.2rem" }}>
+                  {formatSeconds(remainingSeconds)}
+                </div>
+              </div>
+
+              <div style={{ padding: "0.75rem", backgroundColor: "var(--bg-card)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  <Clock size={13} color="var(--color-income)" /> Última Actividad
+                </div>
+                <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-primary)", marginTop: "0.35rem" }}>
+                  {format(new Date(lastActiveTime), "HH:mm:ss", { locale: es })}
+                </div>
+              </div>
+
+              <div style={{ padding: "0.75rem", backgroundColor: "var(--bg-card)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  <Laptop size={13} color="var(--color-warning)" /> Dispositivo
+                </div>
+                <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-primary)", marginTop: "0.35rem" }}>
+                  Navegador Actual (Activo)
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "1rem", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  extendSession();
+                  toast.success("Temporizador de sesión reiniciado exitosamente");
+                }}
+              >
+                <RefreshCw size={14} /> Renovar / Extender Tiempo
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ color: "var(--color-expense)", borderColor: "var(--color-expense-dim)" }}
+                onClick={() => {
+                  if (window.confirm("¿Deseas cerrar y bloquear tu sesión inmediatamente?")) {
+                    lockSessionNow("manual");
+                  }
+                }}
+              >
+                <LogOut size={14} /> Bloquear / Cerrar Sesión Ahora
+              </button>
+            </div>
+          </div>
+
+          {/* Configuration Form */}
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            <div>
+              <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: "0.25rem" }}>
+                Temporizadores de Seguridad e Inactividad
+              </h3>
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                Ajusta los límites de tiempo para bloquear automáticamente el acceso a tus estados de cuenta.
+              </p>
+            </div>
+
+            {/* 1. Inactivity Timeout Selector */}
+            <div className="form-group">
+              <label className="label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>
+                  <Timer size={14} style={{ display: "inline", marginRight: "0.35rem", verticalAlign: "middle", color: "var(--accent)" }} />
+                  Cierre por inactividad tras:
+                </span>
+                <span style={{ fontWeight: 700, color: "var(--accent)", fontSize: "0.8125rem" }}>
+                  {sessionConfig.inactivityTimeoutMinutes} minutos
+                </span>
+              </label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "0.5rem", marginTop: "0.35rem" }}>
+                {[
+                  { label: "5 min", val: 5 },
+                  { label: "10 min", val: 10 },
+                  { label: "15 min (Recomendado)", val: 15 },
+                  { label: "30 min", val: 30 },
+                  { label: "60 min (1 hora)", val: 60 },
+                ].map((opt) => (
+                  <button
+                    key={opt.val}
+                    type="button"
+                    onClick={() => {
+                      updateSessionConfig({ inactivityTimeoutMinutes: opt.val });
+                      toast.success(`Tiempo de inactividad establecido en ${opt.val} minutos`);
+                    }}
+                    style={{
+                      padding: "0.625rem 0.5rem",
+                      borderRadius: "var(--radius-md)",
+                      border: sessionConfig.inactivityTimeoutMinutes === opt.val
+                        ? "2px solid var(--accent)"
+                        : "1px solid var(--border-default)",
+                      backgroundColor: sessionConfig.inactivityTimeoutMinutes === opt.val
+                        ? "var(--accent-subtle)"
+                        : "var(--bg-card-alt)",
+                      color: sessionConfig.inactivityTimeoutMinutes === opt.val
+                        ? "var(--accent)"
+                        : "var(--text-primary)",
+                      fontWeight: sessionConfig.inactivityTimeoutMinutes === opt.val ? 700 : 500,
+                      fontSize: "0.8125rem",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.35rem" }}>
+                Si no se detecta movimiento de mouse, teclado o interacción en este lapso, la sesión se cerrará automáticamente.
+              </p>
+            </div>
+
+            <div className="divider" />
+
+            {/* 2. Close on Browser Exit / Restart switch */}
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer" }} htmlFor="closeOnExitToggle">
+                  <Lock size={15} color="var(--color-income)" />
+                  Exigir inicio de sesión al cerrar el navegador o reiniciar ordenador
+                </label>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: "0.25rem 0 0 0", lineHeight: 1.45 }}>
+                  Garantiza que nadie que acceda a tu ordenador tras reiniciarlo o reabrir el navegador pueda ver tus datos financieros sin antes autenticarse.
+                </p>
+              </div>
+              <input
+                id="closeOnExitToggle"
+                type="checkbox"
+                checked={sessionConfig.closeOnBrowserExit}
+                onChange={(e) => {
+                  updateSessionConfig({ closeOnBrowserExit: e.target.checked });
+                  toast.info(e.target.checked ? "Protección de cierre de navegador ACTIVADA" : "Protección de cierre de navegador desactivada");
+                }}
+                style={{
+                  width: 20,
+                  height: 20,
+                  accentColor: "var(--accent)",
+                  cursor: "pointer",
+                  marginTop: 2,
+                }}
+              />
+            </div>
+
+            <div className="divider" />
+
+            {/* 3. Warning Modal Countdown switch */}
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer" }} htmlFor="showWarningToggle">
+                  <BellRing size={15} color="var(--color-warning)" />
+                  Mostrar ventana de advertencia con cuenta regresiva (60 segundos)
+                </label>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: "0.25rem 0 0 0", lineHeight: 1.45 }}>
+                  Muestra una alerta visual 60 segundos antes del vencimiento para permitirte extender la sesión con un solo clic.
+                </p>
+              </div>
+              <input
+                id="showWarningToggle"
+                type="checkbox"
+                checked={sessionConfig.showWarningModal}
+                onChange={(e) => {
+                  updateSessionConfig({ showWarningModal: e.target.checked });
+                  toast.info(e.target.checked ? "Aviso previo de inactividad ACTIVADO" : "Aviso previo de inactividad desactivado");
+                }}
+                style={{
+                  width: 20,
+                  height: 20,
+                  accentColor: "var(--accent)",
+                  cursor: "pointer",
+                  marginTop: 2,
+                }}
+              />
+            </div>
+
+            <div className="divider" />
+
+            {/* 4. Maximum Continuous Lifetime */}
+            <div className="form-group">
+              <label className="label">
+                <Clock size={14} style={{ display: "inline", marginRight: "0.35rem", verticalAlign: "middle" }} />
+                Duración máxima de sesión continua ininterrumpida
+              </label>
+              <select
+                className="input"
+                value={sessionConfig.maxSessionHours}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  updateSessionConfig({ maxSessionHours: val });
+                  toast.success(`Límite máximo de sesión continua actualizado a ${val === 0 ? "Sin límite" : `${val} horas`}`);
+                }}
+              >
+                <option value={4}>4 Horas</option>
+                <option value={8}>8 Horas</option>
+                <option value={12}>12 Horas (Recomendado)</option>
+                <option value={24}>24 Horas</option>
+                <option value={0}>Sin límite continuo (solo inactividad)</option>
+              </select>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>
+                Incluso con actividad constante, el sistema solicitará renovación de credenciales tras este periodo.
+              </p>
+            </div>
+          </div>
+
+          {/* Educational Security Note */}
+          <div
+            style={{
+              padding: "1rem 1.25rem",
+              borderRadius: "var(--radius-xl)",
+              backgroundColor: "rgba(66, 133, 244, 0.06)",
+              border: "1px solid rgba(66, 133, 244, 0.18)",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.875rem",
+            }}
+          >
+            <Shield size={20} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              <strong style={{ color: "var(--text-primary)", display: "block", marginBottom: "0.2rem" }}>
+                Seguridad Financiera y Sincronización Multi-Pestaña
+              </strong>
+              Los controles de tiempo de ACHouse sincronizan todas las pestañas de tu navegador en tiempo real. Cuando extiendes o cierras tu sesión en una ventana, todas las demás se actualizan instantáneamente.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Audit Logs */}
       {tab === "audit" && (
         <div className="card" style={{ padding: 0 }}>
           <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--border-subtle)" }}>

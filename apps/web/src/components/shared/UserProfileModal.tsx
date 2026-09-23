@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   X, User, Mail, Shield, Home, Calendar, Clock,
-  LogOut, CheckCircle2, KeyRound, Globe, ExternalLink
+  LogOut, CheckCircle2, KeyRound, Globe, ExternalLink,
+  Timer, RefreshCw, Lock
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/ToastContext";
 import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
+import { useSessionSecurity } from "@/components/shared/SessionSecurityProvider";
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -369,6 +371,9 @@ export function UserProfileModal({
             </div>
           </div>
 
+          {/* Session Security Banner */}
+          <SessionSecurityWidget onClose={onClose} />
+
           {/* Clerk Profile Action if available */}
           {onOpenClerkProfile && (
             <button
@@ -471,3 +476,109 @@ export function UserProfileModal({
     document.body
   );
 }
+
+function SessionSecurityWidget({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const toast = useToast();
+  let session: any = null;
+  try {
+    session = useSessionSecurity();
+  } catch {
+    session = null;
+  }
+
+  if (!session) return null;
+
+  const { remainingSeconds, config, extendSession } = session;
+  const mins = Math.floor(remainingSeconds / 60);
+  const secs = remainingSeconds % 60;
+  const formattedRemaining = `${mins}m ${secs < 10 ? "0" : ""}${secs}s`;
+
+  return (
+    <div
+      style={{
+        padding: "0.875rem 1rem",
+        backgroundColor: "rgba(66, 133, 244, 0.05)",
+        border: "1px solid rgba(66, 133, 244, 0.2)",
+        borderRadius: "var(--radius-xl)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.625rem",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.8125rem", fontWeight: 700, color: "var(--text-primary)" }}>
+          <Timer size={15} color="var(--accent)" />
+          Control de Inactividad de Sesión
+        </div>
+        <span
+          style={{
+            fontSize: "0.75rem",
+            fontWeight: 800,
+            fontFamily: "monospace",
+            color: remainingSeconds <= 60 ? "var(--color-expense)" : "var(--accent)",
+            background: "var(--bg-card)",
+            padding: "0.15rem 0.5rem",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          {formattedRemaining}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
+        <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", margin: 0 }}>
+          Límite: <strong>{config.inactivityTimeoutMinutes} min</strong>
+          {config.closeOnBrowserExit ? " • Cierre al salir activo" : ""}
+        </p>
+
+        <div style={{ display: "flex", gap: "0.35rem" }}>
+          <button
+            type="button"
+            onClick={() => {
+              extendSession();
+              toast.success("Tiempo de sesión extendido");
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.25rem",
+              padding: "0.25rem 0.5rem",
+              borderRadius: "var(--radius-sm)",
+              backgroundColor: "var(--accent-subtle)",
+              color: "var(--accent)",
+              border: "1px solid rgba(66, 133, 244, 0.3)",
+              fontSize: "0.6875rem",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            <RefreshCw size={11} /> Extender
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              router.push("/dashboard/settings");
+            }}
+            style={{
+              padding: "0.25rem 0.5rem",
+              borderRadius: "var(--radius-sm)",
+              backgroundColor: "var(--bg-card)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-default)",
+              fontSize: "0.6875rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Ajustar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
