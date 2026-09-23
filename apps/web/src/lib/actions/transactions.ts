@@ -253,35 +253,37 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       })
       .returning();
 
-    // 5. Update account balance safely
-    const current = parseFloat(account.balance || "0");
-    const amount = parseFloat(parsed.amount.toString());
-    let newBalance = current;
+    // 5. Update account balance safely ONLY if transaction is not pending
+    if (parsed.status !== "pending") {
+      const current = parseFloat(account.balance || "0");
+      const amount = parseFloat(parsed.amount.toString());
+      let newBalance = current;
 
-    if (parsed.type === "income") {
-      newBalance = current + amount;
-    } else if (parsed.type === "expense") {
-      newBalance = current - amount;
-    } else if (parsed.type === "transfer") {
-      newBalance = current - amount;
-      if (parsed.toAccountId) {
-        const toAccount = await db.query.accounts.findFirst({
-          where: and(eq(accounts.id, parsed.toAccountId), eq(accounts.householdId, householdId)),
-        });
-        if (toAccount) {
-          const toCurrent = parseFloat(toAccount.balance || "0");
-          await db
-            .update(accounts)
-            .set({ balance: (toCurrent + amount).toFixed(2), updatedAt: new Date() })
-            .where(eq(accounts.id, toAccount.id));
+      if (parsed.type === "income") {
+        newBalance = current + amount;
+      } else if (parsed.type === "expense") {
+        newBalance = current - amount;
+      } else if (parsed.type === "transfer") {
+        newBalance = current - amount;
+        if (parsed.toAccountId) {
+          const toAccount = await db.query.accounts.findFirst({
+            where: and(eq(accounts.id, parsed.toAccountId), eq(accounts.householdId, householdId)),
+          });
+          if (toAccount) {
+            const toCurrent = parseFloat(toAccount.balance || "0");
+            await db
+              .update(accounts)
+              .set({ balance: (toCurrent + amount).toFixed(2), updatedAt: new Date() })
+              .where(eq(accounts.id, toAccount.id));
+          }
         }
       }
-    }
 
-    await db
-      .update(accounts)
-      .set({ balance: newBalance.toFixed(2), updatedAt: new Date() })
-      .where(eq(accounts.id, account.id));
+      await db
+        .update(accounts)
+        .set({ balance: newBalance.toFixed(2), updatedAt: new Date() })
+        .where(eq(accounts.id, account.id));
+    }
 
     try {
       revalidatePath("/dashboard");
@@ -311,6 +313,99 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
   } catch (err: any) {
     console.error("Error in createTransaction:", err);
     return { success: false, error: err?.message || "Error al registrar la transacción" };
+  }
+}
+
+export async function confirmPendingTransaction(
+  id: string,
+  options?: {
+    accountId?: string;
+    depositDate?: string;
+    notes?: string;
+  }
+) {
+  try {
+    const authCtx = await getAuthenticatedMember();
+    if (authCtx.error || !authCtx.householdId) {
+      return { success: false, error: authCtx.error || "No autorizado" };
+    }
+    const { householdId } = authCtx;
+
+    const existing = await db.query.transactions.findFirst({
+      where: and(eq(transactions.id, id), eq(transactions.householdId, householdId), isNull(transactions.deletedAt)),
+    });
+
+    if (!existing) {
+      return { success: false, error: "Transacción no encontrada" };
+    }
+
+    if (existing.status !== "pending") {
+      return { success: false, error: "La transacción ya fue confirmada anteriormente" };
+    }
+
+    const targetAccountId = options?.accountId || existing.accountId;
+    const targetAccount = await db.query.accounts.findFirst({
+      where: and(eq(accounts.id, targetAccountId), eq(accounts.householdId, householdId)),
+    });
+
+    if (!targetAccount) {
+      return { success: false, error: "Cuenta de depósito no encontrada" };
+    }
+
+    const amount = parseFloat(existing.amount || "0");
+    const currentBal = parseFloat(targetAccount.balance || "0");
+    let newBal = currentBal;
+
+    if (existing.type === "income") {
+      newBal = currentBal + amount;
+    } else if (existing.type === "expense") {
+      newBal = currentBal - amount;
+    } else if (existing.type === "transfer") {
+      newBal = currentBal - amount;
+      if (existing.toAccountId) {
+        const toAcc = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, existing.toAccountId), eq(accounts.householdId, householdId)),
+        });
+        if (toAcc) {
+          const toCur = parseFloat(toAcc.balance || "0");
+          await db
+            .update(accounts)
+            .set({ balance: (toCur + amount).toFixed(2), updatedAt: new Date() })
+            .where(eq(accounts.id, toAcc.id));
+        }
+      }
+    }
+
+    await db
+      .update(accounts)
+      .set({ balance: newBal.toFixed(2), updatedAt: new Date() })
+      .where(eq(accounts.id, targetAccount.id));
+
+    const confirmedDate = options?.depositDate ? new Date(options.depositDate) : new Date();
+
+    const [updated] = await db
+      .update(transactions)
+      .set({
+        status: "cleared",
+        accountId: targetAccountId,
+        date: confirmedDate,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning();
+
+    try {
+      revalidatePath("/dashboard");
+      revalidatePath("/dashboard/transactions");
+      revalidatePath("/dashboard/businesses");
+    } catch (revErr) {
+      console.warn("revalidatePath warning:", revErr);
+    }
+
+    return { success: true, transaction: updated };
+  } catch (err: any) {
+    console.error("Error in confirmPendingTransaction:", err);
+    return { success: false, error: err?.message || "Error al confirmar la recepción del dinero" };
   }
 }
 
@@ -366,6 +461,66 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
       }
     }
 
+    // Handle balance changes if status or amount changed
+    const oldStatus = existing.status;
+    const newStatus = data.status || oldStatus;
+    const oldAmount = parseFloat(existing.amount || "0");
+    const newAmount = data.amount !== undefined ? parseFloat(data.amount.toString()) : oldAmount;
+    const targetAccountId = data.accountId || existing.accountId;
+
+    if (oldStatus === "pending" && (newStatus === "cleared" || newStatus === "reconciled")) {
+      // Transition from pending -> cleared: add to balance
+      const account = await db.query.accounts.findFirst({
+        where: and(eq(accounts.id, targetAccountId), eq(accounts.householdId, householdId)),
+      });
+      if (account) {
+        const cur = parseFloat(account.balance || "0");
+        const diff = existing.type === "income" ? newAmount : existing.type === "expense" ? -newAmount : 0;
+        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+      }
+    } else if ((oldStatus === "cleared" || oldStatus === "reconciled") && newStatus === "pending") {
+      // Transition from cleared -> pending: reverse from balance
+      const account = await db.query.accounts.findFirst({
+        where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
+      });
+      if (account) {
+        const cur = parseFloat(account.balance || "0");
+        const diff = existing.type === "income" ? -oldAmount : existing.type === "expense" ? oldAmount : 0;
+        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+      }
+    } else if ((oldStatus === "cleared" || oldStatus === "reconciled") && (newStatus === "cleared" || newStatus === "reconciled") && (oldAmount !== newAmount || data.accountId)) {
+      // Amount or account changed while active
+      if (data.accountId && data.accountId !== existing.accountId) {
+        // Reverse from old account
+        const oldAcc = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
+        });
+        if (oldAcc) {
+          const cur = parseFloat(oldAcc.balance || "0");
+          const diff = existing.type === "income" ? -oldAmount : existing.type === "expense" ? oldAmount : 0;
+          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, oldAcc.id));
+        }
+        // Apply to new account
+        const newAcc = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, data.accountId), eq(accounts.householdId, householdId)),
+        });
+        if (newAcc) {
+          const cur = parseFloat(newAcc.balance || "0");
+          const diff = existing.type === "income" ? newAmount : existing.type === "expense" ? -newAmount : 0;
+          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, newAcc.id));
+        }
+      } else {
+        const account = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
+        });
+        if (account) {
+          const cur = parseFloat(account.balance || "0");
+          const diff = existing.type === "income" ? (newAmount - oldAmount) : existing.type === "expense" ? -(newAmount - oldAmount) : 0;
+          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+        }
+      }
+    }
+
     await db
       .update(transactions)
       .set({
@@ -400,6 +555,27 @@ export async function deleteTransaction(id: string) {
     }
     const { householdId } = authCtx;
 
+    const existing = await db.query.transactions.findFirst({
+      where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
+    });
+
+    if (existing && (existing.status === "cleared" || existing.status === "reconciled")) {
+      const numAmount = parseFloat(existing.amount || "0");
+      if (existing.type === "income") {
+        const account = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
+        if (account) {
+          const cur = parseFloat(account.balance || "0");
+          await db.update(accounts).set({ balance: (cur - numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+        }
+      } else if (existing.type === "expense") {
+        const account = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
+        if (account) {
+          const cur = parseFloat(account.balance || "0");
+          await db.update(accounts).set({ balance: (cur + numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+        }
+      }
+    }
+
     await db
       .update(transactions)
       .set({ deletedAt: new Date() })
@@ -426,6 +602,8 @@ export async function getDashboardKPIs() {
       totalBalance: 0,
       monthlyIncome: 0,
       monthlyExpenses: 0,
+      pendingIncome: 0,
+      pendingCount: 0,
       netCashFlow: 0,
       topCategories: [],
       recentTransactions: [],
@@ -437,7 +615,7 @@ export async function getDashboardKPIs() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  const [monthlyTxs, allAccounts] = await Promise.all([
+  const [monthlyTxs, allPendingTxs, allAccounts] = await Promise.all([
     db.query.transactions.findMany({
       where: and(
         eq(transactions.householdId, householdId),
@@ -447,6 +625,13 @@ export async function getDashboardKPIs() {
       ),
       with: { category: true },
     }),
+    db.query.transactions.findMany({
+      where: and(
+        eq(transactions.householdId, householdId),
+        eq(transactions.status, "pending"),
+        isNull(transactions.deletedAt)
+      ),
+    }),
     db.query.accounts.findMany({
       where: and(eq(accounts.householdId, householdId), eq(accounts.isActive, true), isNull(accounts.deletedAt)),
     }),
@@ -454,10 +639,13 @@ export async function getDashboardKPIs() {
 
   const totalBalance = allAccounts.reduce((s, a) => s + parseFloat(a.balance || "0"), 0);
   const monthlyIncome = monthlyTxs
-    .filter((t) => t.type === "income")
+    .filter((t) => t.type === "income" && t.status !== "pending")
     .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
   const monthlyExpenses = monthlyTxs
-    .filter((t) => t.type === "expense")
+    .filter((t) => t.type === "expense" && t.status !== "pending")
+    .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+  const pendingIncome = allPendingTxs
+    .filter((t) => t.type === "income")
     .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
 
   // Top categories by expense
@@ -477,6 +665,8 @@ export async function getDashboardKPIs() {
     totalBalance,
     monthlyIncome,
     monthlyExpenses,
+    pendingIncome,
+    pendingCount: allPendingTxs.filter(t => t.type === "income").length,
     netCashFlow: monthlyIncome - monthlyExpenses,
     topCategories,
     recentTransactions: monthlyTxs.slice(0, 5),

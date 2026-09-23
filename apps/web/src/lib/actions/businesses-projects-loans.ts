@@ -92,26 +92,59 @@ export async function getBusinesses() {
     const isExpenseTx = (t: (typeof txs)[0]) =>
       t.type === "expense" || (t.type === "transfer" && t.category?.type !== "income");
 
+    // Realized / Cleared Income & Expenses
     const income = bTxs
-      .filter(isIncomeTx)
+      .filter((t) => isIncomeTx(t) && t.status !== "pending")
       .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
 
     const expenses = bTxs
-      .filter(isExpenseTx)
+      .filter((t) => isExpenseTx(t) && t.status !== "pending")
+      .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+
+    // Pending Income (Cuentas por cobrar a clientes) & Pending Expenses
+    const pendingIncome = bTxs
+      .filter((t) => isIncomeTx(t) && t.status === "pending")
+      .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
+
+    const pendingExpenses = bTxs
+      .filter((t) => isExpenseTx(t) && t.status === "pending")
       .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
 
     const net = income - expenses;
+    const projectedNet = (income + pendingIncome) - (expenses + pendingExpenses);
 
-    const monthlyMap = new Map<string, { month: string; income: number; expenses: number }>();
+    const pendingList = bTxs
+      .filter((t) => t.status === "pending")
+      .map((t) => ({
+        id: t.id,
+        description: t.description,
+        type: t.type,
+        amount: String(t.amount),
+        currency: t.currency,
+        date: t.date instanceof Date ? t.date.toISOString() : String(t.date),
+        accountId: t.accountId,
+        categoryId: t.categoryId,
+        memberId: t.memberId,
+        businessId: t.businessId,
+        status: t.status,
+      }));
+
+    const monthlyMap = new Map<string, { month: string; income: number; expenses: number; pendingIncome: number }>();
     bTxs.forEach((t) => {
       const d = new Date(t.date);
       const mKey = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(-2)}`;
-      const cur = monthlyMap.get(mKey) ?? { month: mKey, income: 0, expenses: 0 };
+      const cur = monthlyMap.get(mKey) ?? { month: mKey, income: 0, expenses: 0, pendingIncome: 0 };
       const amt = parseFloat(t.amount || "0");
       if (isIncomeTx(t)) {
-        cur.income += amt;
+        if (t.status === "pending") {
+          cur.pendingIncome += amt;
+        } else {
+          cur.income += amt;
+        }
       } else {
-        cur.expenses += amt;
+        if (t.status !== "pending") {
+          cur.expenses += amt;
+        }
       }
       monthlyMap.set(mKey, cur);
     });
@@ -120,8 +153,13 @@ export async function getBusinesses() {
       ...b,
       income,
       expenses,
+      pendingIncome,
+      pendingExpenses,
       net,
+      projectedNet,
       transactions: bTxs.length,
+      pendingCount: pendingList.length,
+      pendingTransactions: pendingList,
       monthlyData: Array.from(monthlyMap.values()),
       members: assignedMembers.map((m) => ({
         id: m.id,

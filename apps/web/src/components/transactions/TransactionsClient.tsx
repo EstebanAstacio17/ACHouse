@@ -5,7 +5,7 @@ import {
   Plus, Search, Filter, Download, ArrowUpCircle, ArrowDownCircle,
   ArrowLeftRight, Pencil, Trash2, ChevronLeft, ChevronRight,
   X, Check, Calendar, CreditCard, Tag, User, Paperclip, Repeat,
-  FileSpreadsheet, Eye, AlertCircle, Building2
+  FileSpreadsheet, Eye, AlertCircle, Building2, Clock, CheckCircle2, DollarSign
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { useUser } from "@clerk/nextjs";
 import { formatMoney } from "@/lib/geo";
 import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
-import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "@/lib/actions/transactions";
+import { getTransactions, createTransaction, updateTransaction, deleteTransaction, confirmPendingTransaction } from "@/lib/actions/transactions";
 import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
 import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
 
@@ -48,9 +48,112 @@ const TYPE_CONFIG = {
 
 const STATUS_CONFIG = {
   cleared: { label: "Conciliado", color: "var(--color-income)" },
-  pending: { label: "Pendiente", color: "var(--color-warning)" },
+  pending: { label: "Pendiente por Cobrar", color: "var(--color-warning)" },
   reconciled: { label: "Reconciliado", color: "var(--accent)" },
 };
+
+// ─── Modal de Confirmación de Cobro ──────────────────────────────────────────
+function ConfirmCollectionModal({
+  onClose,
+  onConfirm,
+  transaction,
+  accountsList,
+}: {
+  onClose: () => void;
+  onConfirm: (txId: string, accountId: string, depositDate: string) => Promise<void>;
+  transaction: TransactionItem;
+  accountsList: Array<{ id: string; name: string; currency?: string }>;
+}) {
+  const [selectedAccountId, setSelectedAccountId] = useState(
+    transaction.account?.id || (accountsList[0]?.id ?? "")
+  );
+  const [depositDate, setDepositDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const backdropProps = useSafeBackdropClose(onClose);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await onConfirm(transaction.id, selectedAccountId, depositDate);
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="overlay"
+      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+      {...backdropProps}
+    >
+      <div className="modal" style={{ width: "min(480px, 95vw)" }}>
+        <div className="modal-header">
+          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <DollarSign size={20} color="var(--color-income)" /> Confirmar Ingreso / Cobro
+          </h2>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ background: "var(--color-income-dim)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "1rem" }}>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginBottom: "0.25rem", textTransform: "uppercase", fontWeight: 700 }}>
+                Monto que ingresa:
+              </p>
+              <p style={{ fontSize: "1.625rem", fontWeight: 800, color: "var(--color-income)" }}>
+                +{formatMoney(transaction.amount, transaction.currency)}
+              </p>
+              <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", fontWeight: 600, marginTop: "0.35rem" }}>
+                {transaction.description} {transaction.business ? `· ${transaction.business.name}` : ""}
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="label">¿A qué cuenta ingresó el dinero? *</label>
+              <select
+                className="input"
+                value={selectedAccountId}
+                onChange={e => setSelectedAccountId(e.target.value)}
+                required
+              >
+                {accountsList.map(a => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.currency || "DOP"})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="label">Fecha de recepción / depósito *</label>
+              <input
+                type="date"
+                className="input"
+                value={depositDate}
+                onChange={e => setDepositDate(e.target.value)}
+                required
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", background: "var(--surface-2)", padding: "0.625rem 0.75rem", borderRadius: "var(--radius-sm)" }}>
+              <CheckCircle2 size={16} color="var(--color-income)" style={{ flexShrink: 0, marginTop: 2 }} />
+              <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", margin: 0, lineHeight: 1.4 }}>
+                Al confirmar, el estado cambiará a <strong>Conciliado</strong> y el balance de la cuenta seleccionada se incrementará exactamente en <strong>{formatMoney(transaction.amount, transaction.currency)}</strong>.
+              </p>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={isSubmitting}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting} style={{ background: "var(--color-income)", borderColor: "var(--color-income)" }}>
+              <Check size={15} /> {isSubmitting ? "Confirmando..." : "Confirmar Recepción"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 const CATEGORIES_LIST = [
   { id: "cat1", name: "Alimentación", color: "#6366f1", type: "expense" as const },
@@ -410,14 +513,57 @@ function TransactionModal({
               </div>
               {/* Status */}
               <div className="form-group">
-                <label className="label">Estado</label>
+                <label className="label">
+                  <Clock size={12} style={{ display: "inline", marginRight: 4 }} />
+                  Estado del Dinero *
+                </label>
                 <select className="input" value={form.status} onChange={e => set("status", e.target.value)}>
-                  <option value="cleared">Conciliado</option>
-                  <option value="pending">Pendiente</option>
-                  <option value="reconciled">Reconciliado</option>
+                  {form.type === "income" ? (
+                    <>
+                      <option value="cleared">✅ Cobrado / Recibido (Acreditar a cuenta)</option>
+                      <option value="pending">⏳ Pendiente por Cobrar (Cliente debe / Por recibir)</option>
+                      <option value="reconciled">🔒 Reconciliado (Verificado en extracto)</option>
+                    </>
+                  ) : form.type === "expense" ? (
+                    <>
+                      <option value="cleared">✅ Pagado / Realizado (Debitar de cuenta)</option>
+                      <option value="pending">⏳ Pendiente de Pago (Por pagar)</option>
+                      <option value="reconciled">🔒 Reconciliado (Verificado en extracto)</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="cleared">✅ Completada</option>
+                      <option value="pending">⏳ Pendiente</option>
+                      <option value="reconciled">🔒 Reconciliada</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>
+
+            {form.status === "pending" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  background: "var(--color-warning-dim)",
+                  border: "1px solid var(--border-subtle)",
+                  padding: "0.5rem 0.75rem",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--color-warning)",
+                  fontSize: "0.75rem",
+                  fontWeight: 500,
+                }}
+              >
+                <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                <span>
+                  {form.type === "income"
+                    ? "Este ingreso se guardará como pendiente de cobro y NO afectará el balance de tus cuentas hasta que confirmes que el dinero fue recibido."
+                    : "Este egreso se registrará como pendiente y no afectará el balance hasta que confirmes el pago."}
+                </span>
+              </div>
+            )}
 
             {/* Account and Category Selection */}
             {form.type === "transfer" ? (
@@ -714,6 +860,7 @@ export function TransactionsClient() {
   const [businessesList, setBusinessesList] = useState<Array<{ id: string; name: string; type?: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
+  const [confirmingItem, setConfirmingItem] = useState<TransactionItem | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
@@ -731,6 +878,10 @@ export function TransactionsClient() {
       const bizParam = params.get("business");
       if (bizParam) {
         setFilterBusiness(bizParam);
+      }
+      const statusParam = params.get("status");
+      if (statusParam) {
+        setFilterStatus(statusParam);
       }
       if (params.get("new") === "true") {
         setShowModal(true);
@@ -917,13 +1068,48 @@ export function TransactionsClient() {
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
 
+  const pendingStats = useMemo(() => {
+    const list = transactionsList.filter(t => t.type === "income" && t.status === "pending");
+    return {
+      count: list.length,
+      total: list.reduce((s, t) => s + parseFloat(t.amount || "0"), 0),
+    };
+  }, [transactionsList]);
+
   const totals = useMemo(() => ({
-    income: filtered.filter(t => t.type === "income").reduce((s, t) => s + parseFloat(t.amount), 0),
-    expense: filtered.filter(t => t.type === "expense").reduce((s, t) => s + parseFloat(t.amount), 0),
+    income: filtered.filter(t => t.type === "income" && t.status !== "pending").reduce((s, t) => s + parseFloat(t.amount), 0),
+    expense: filtered.filter(t => t.type === "expense" && t.status !== "pending").reduce((s, t) => s + parseFloat(t.amount), 0),
+    pending: filtered.filter(t => t.type === "income" && t.status === "pending").reduce((s, t) => s + parseFloat(t.amount), 0),
   }), [filtered]);
 
   const fmt = (n: number | string, currency?: string) => {
     return formatMoney(n, currency || householdCurrency || "DOP");
+  };
+
+  const handleConfirmCollection = async (txId: string, accountId: string, depositDate: string) => {
+    try {
+      const res = await confirmPendingTransaction(txId, { accountId, depositDate });
+      if (!res || !res.success) {
+        toast.error(res?.error || "Error al confirmar la recepción del dinero");
+        return;
+      }
+      const selectedAcc = accountsList.find(a => a.id === accountId);
+      setTransactionsList(prev =>
+        prev.map(t =>
+          t.id === txId
+            ? {
+                ...t,
+                status: "cleared",
+                account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : t.account,
+                date: new Date(depositDate + "T12:00:00"),
+              }
+            : t
+        )
+      );
+      toast.success("¡Cobro confirmado exitosamente! El saldo de la cuenta fue actualizado.");
+    } catch (err: any) {
+      toast.error(err?.message || "Error al confirmar el cobro");
+    }
   };
 
   const handleSaveTransaction = async (saved: Partial<TransactionItem>) => {
@@ -991,7 +1177,11 @@ export function TransactionsClient() {
           notes: saved.notes || undefined,
         };
         setTransactionsList(prev => [newTx, ...prev]);
-        toast.success("Transacción registrada exitosamente");
+        toast.success(
+          saved.status === "pending"
+            ? "Transacción registrada como pendiente por cobrar"
+            : "Transacción registrada exitosamente"
+        );
       }
     } catch (err: any) {
       toast.error(err?.message || "Error al registrar la transacción");
@@ -1023,7 +1213,7 @@ export function TransactionsClient() {
       Integrante: formatMemberName(t.member?.displayName),
       Monto: parseFloat(t.amount),
       Moneda: t.currency,
-      Estado: t.status,
+      Estado: t.status === "pending" ? "Pendiente por Cobrar" : t.status === "cleared" ? "Conciliado" : "Reconciliado",
       Recurrente: t.isRecurring ? `Sí (${t.recurringFrequency})` : "No",
     }));
 
@@ -1048,6 +1238,16 @@ export function TransactionsClient() {
           currentMemberId={currentMemberId}
           defaultBusinessId={filterBusiness !== "all" && filterBusiness !== "none" ? filterBusiness : undefined}
           householdCurrency={householdCurrency}
+        />
+      )}
+
+      {/* Confirm Collection Modal */}
+      {confirmingItem && (
+        <ConfirmCollectionModal
+          transaction={confirmingItem}
+          accountsList={accountsList}
+          onClose={() => setConfirmingItem(null)}
+          onConfirm={handleConfirmCollection}
         />
       )}
 
@@ -1098,24 +1298,76 @@ export function TransactionsClient() {
         </div>
 
         {/* Summary Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
           {[
-            { label: "Total Ingresos", value: fmt(totals.income, householdCurrency), color: "var(--color-income)", bg: "var(--color-income-dim)", icon: ArrowUpCircle },
-            { label: "Total Egresos", value: fmt(totals.expense, householdCurrency), color: "var(--color-expense)", bg: "var(--color-expense-dim)", icon: ArrowDownCircle },
             {
-              label: "Balance Neto",
+              label: "Ingresos Recibidos",
+              value: fmt(totals.income, householdCurrency),
+              color: "var(--color-income)",
+              bg: "var(--color-income-dim)",
+              icon: ArrowUpCircle,
+              sub: "Efectivo y depositado",
+            },
+            {
+              label: "Por Cobrar / Pendiente",
+              value: fmt(pendingStats.total, householdCurrency),
+              color: "var(--color-warning)",
+              bg: "var(--color-warning-dim)",
+              icon: Clock,
+              sub: `${pendingStats.count} cobro${pendingStats.count === 1 ? "" : "s"} de clientes`,
+              badgeAction: () => { setFilterStatus(filterStatus === "pending" ? "all" : "pending"); setPage(1); },
+              badgeActive: filterStatus === "pending",
+            },
+            {
+              label: "Total Egresos",
+              value: fmt(totals.expense, householdCurrency),
+              color: "var(--color-expense)",
+              bg: "var(--color-expense-dim)",
+              icon: ArrowDownCircle,
+              sub: "Gastos y pagos",
+            },
+            {
+              label: "Balance Neto Real",
               value: ((totals.income - totals.expense) >= 0 ? "+" : "-") + fmt(Math.abs(totals.income - totals.expense), householdCurrency),
               color: (totals.income - totals.expense) >= 0 ? "var(--color-income)" : "var(--color-expense)",
               bg: (totals.income - totals.expense) >= 0 ? "var(--color-income-dim)" : "var(--color-expense-dim)",
-              icon: ArrowLeftRight
+              icon: ArrowLeftRight,
+              sub: "Recibido − Pagado",
             },
           ].map(card => (
-            <div key={card.label} className="card" style={{ background: card.bg, border: `1px solid var(--border-subtle)`, padding: "1.25rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "0.5rem" }}>
-                <card.icon size={16} color={card.color} />
-                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{card.label}</span>
+            <div
+              key={card.label}
+              className="card"
+              style={{
+                background: card.bg,
+                border: card.badgeActive ? `2px solid ${card.color}` : `1px solid var(--border-subtle)`,
+                padding: "1.25rem",
+                cursor: card.badgeAction ? "pointer" : "default",
+                transition: "all 0.2s ease",
+              }}
+              onClick={card.badgeAction}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <card.icon size={16} color={card.color} />
+                  <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", fontWeight: 600 }}>{card.label}</span>
+                </div>
+                {card.badgeAction && (
+                  <span style={{
+                    fontSize: "0.6875rem",
+                    padding: "0.15rem 0.45rem",
+                    borderRadius: 999,
+                    background: card.badgeActive ? card.color : "transparent",
+                    color: card.badgeActive ? "#fff" : card.color,
+                    border: `1px solid ${card.color}`,
+                    fontWeight: 700
+                  }}>
+                    {card.badgeActive ? "Filtrado" : "Filtrar"}
+                  </span>
+                )}
               </div>
-              <p style={{ fontSize: "1.375rem", fontWeight: 800, color: card.color }}>{card.value}</p>
+              <p style={{ fontSize: "1.375rem", fontWeight: 800, color: card.color, margin: 0 }}>{card.value}</p>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.35rem", margin: 0 }}>{card.sub}</p>
             </div>
           ))}
         </div>
@@ -1126,12 +1378,26 @@ export function TransactionsClient() {
             <Search size={15} style={{ position: "absolute", left: "0.875rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
             <input
               className="input"
-              placeholder="Buscar por descripción, categoría, cuenta..."
+              placeholder="Buscar por descripción, cliente, categoría, empresa..."
               style={{ paddingLeft: "2.5rem" }}
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
             />
           </div>
+
+          {/* Status Quick Pill: Por Cobrar */}
+          <button
+            onClick={() => { setFilterStatus(filterStatus === "pending" ? "all" : "pending"); setPage(1); }}
+            className={`btn btn-sm ${filterStatus === "pending" ? "btn-primary" : "btn-secondary"}`}
+            style={{
+              borderColor: filterStatus === "pending" ? "var(--color-warning)" : "var(--border-default)",
+              background: filterStatus === "pending" ? "var(--color-warning)" : undefined,
+              color: filterStatus === "pending" ? "#fff" : "var(--color-warning)",
+              fontWeight: 700,
+            }}
+          >
+            <Clock size={13} /> Por Cobrar {pendingStats.count > 0 ? `(${pendingStats.count})` : ""}
+          </button>
 
           {/* Type filters */}
           <div style={{ display: "flex", gap: "0.375rem" }}>
@@ -1141,7 +1407,7 @@ export function TransactionsClient() {
                 onClick={() => { setFilterType(t); setPage(1); }}
                 className={`btn btn-sm ${filterType === t ? "btn-primary" : "btn-secondary"}`}
               >
-                {t === "all" ? "Todos" : TYPE_CONFIG[t as keyof typeof TYPE_CONFIG]?.label ?? t}
+                {t === "all" ? "Todos los tipos" : TYPE_CONFIG[t as keyof typeof TYPE_CONFIG]?.label ?? t}
               </button>
             ))}
           </div>
@@ -1182,6 +1448,19 @@ export function TransactionsClient() {
               </select>
             </div>
           )}
+
+          {/* Status Filter Dropdown */}
+          <select
+            className="input"
+            style={{ width: "auto", fontSize: "0.75rem", padding: "0.35rem 0.6rem" }}
+            value={filterStatus}
+            onChange={e => { setFilterStatus(e.target.value); setPage(1); }}
+          >
+            <option value="all">Todos los estados</option>
+            <option value="cleared">✅ Conciliados / Recibidos</option>
+            <option value="pending">⏳ Pendientes de Cobro / Entrada</option>
+            <option value="reconciled">🔒 Reconciliados</option>
+          </select>
         </div>
 
         {/* Table or Empty State */}
@@ -1220,9 +1499,10 @@ export function TransactionsClient() {
                 ) : (
                 paginated.map(tx => {
                   const typeCfg = TYPE_CONFIG[tx.type];
+                  const isPending = tx.status === "pending";
                   const statusCfg = STATUS_CONFIG[tx.status] ?? STATUS_CONFIG.cleared;
                   return (
-                    <tr key={tx.id}>
+                    <tr key={tx.id} style={{ background: isPending ? "rgba(245, 158, 11, 0.03)" : undefined }}>
                       <td>
                         <div style={{ width: 32, height: 32, borderRadius: 8, background: typeCfg.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <typeCfg.Icon size={16} color={typeCfg.color} />
@@ -1246,6 +1526,21 @@ export function TransactionsClient() {
                                 fontWeight: 600
                               }}>
                                 <Building2 size={10} /> {tx.business.name}
+                              </span>
+                            )}
+                            {isPending && tx.type === "income" && (
+                              <span style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                fontSize: "0.6875rem",
+                                background: "var(--color-warning-dim)",
+                                color: "var(--color-warning)",
+                                padding: "0.1rem 0.4rem",
+                                borderRadius: 4,
+                                fontWeight: 700
+                              }}>
+                                <Clock size={10} /> Por cobrar
                               </span>
                             )}
                             {tx.isRecurring && (
@@ -1289,18 +1584,53 @@ export function TransactionsClient() {
                         {format(tx.date, "dd MMM yyyy", { locale: es })}
                       </td>
                       <td>
-                        <span style={{ fontSize: "0.75rem", fontWeight: 600, color: statusCfg.color, background: `${statusCfg.color}15`, padding: "0.2rem 0.5rem", borderRadius: 999 }}>
+                        <span style={{
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          color: isPending ? "var(--color-warning)" : statusCfg.color,
+                          background: isPending ? "var(--color-warning-dim)" : `${statusCfg.color}15`,
+                          border: isPending ? "1px solid var(--color-warning)" : "none",
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: 999,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.25rem"
+                        }}>
+                          {isPending && <Clock size={11} />}
                           {statusCfg.label}
                         </span>
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: typeCfg.color }}>
+                        <span style={{
+                          fontWeight: 700,
+                          fontSize: "0.9375rem",
+                          color: isPending ? "var(--color-warning)" : typeCfg.color
+                        }}>
                           {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
                           {fmt(Math.abs(parseFloat(tx.amount)), tx.currency || householdCurrency || "DOP")}
                         </span>
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        <div style={{ display: "flex", gap: "0.25rem", justifyContent: "center" }}>
+                        <div style={{ display: "flex", gap: "0.375rem", justifyContent: "center", alignItems: "center" }}>
+                          {isPending && tx.type === "income" && (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              style={{
+                                fontSize: "0.75rem",
+                                padding: "0.25rem 0.55rem",
+                                gap: "0.25rem",
+                                background: "var(--color-income)",
+                                borderColor: "var(--color-income)",
+                                color: "#fff",
+                                fontWeight: 700,
+                                borderRadius: "var(--radius-sm)",
+                              }}
+                              title="Confirmar recepción del dinero"
+                              onClick={() => setConfirmingItem(tx)}
+                            >
+                              <CheckCircle2 size={13} /> Confirmar Cobro
+                            </button>
+                          )}
                           <button
                             className="btn btn-ghost btn-icon btn-sm"
                             title="Editar"

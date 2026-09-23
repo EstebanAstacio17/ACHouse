@@ -153,41 +153,43 @@ export async function POST(
       })
       .returning();
 
-    // Update account balances
-    if (d.type === "expense") {
-      await db
-        .update(accounts)
-        .set({
-          balance: sql`${accounts.balance} - ${numAmount}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(accounts.id, d.accountId));
-    } else if (d.type === "income") {
-      await db
-        .update(accounts)
-        .set({
-          balance: sql`${accounts.balance} + ${numAmount}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(accounts.id, d.accountId));
-    } else if (d.type === "transfer" && d.toAccountId) {
-      // Source account
-      await db
-        .update(accounts)
-        .set({
-          balance: sql`${accounts.balance} - ${numAmount}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(accounts.id, d.accountId));
+    // Update account balances only if transaction is not pending
+    if (d.status !== "pending") {
+      if (d.type === "expense") {
+        await db
+          .update(accounts)
+          .set({
+            balance: sql`${accounts.balance} - ${numAmount}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(accounts.id, d.accountId));
+      } else if (d.type === "income") {
+        await db
+          .update(accounts)
+          .set({
+            balance: sql`${accounts.balance} + ${numAmount}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(accounts.id, d.accountId));
+      } else if (d.type === "transfer" && d.toAccountId) {
+        // Source account
+        await db
+          .update(accounts)
+          .set({
+            balance: sql`${accounts.balance} - ${numAmount}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(accounts.id, d.accountId));
 
-      // Destination account
-      await db
-        .update(accounts)
-        .set({
-          balance: sql`${accounts.balance} + ${numAmount}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(accounts.id, d.toAccountId));
+        // Destination account
+        await db
+          .update(accounts)
+          .set({
+            balance: sql`${accounts.balance} + ${numAmount}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(accounts.id, d.toAccountId));
+      }
     }
 
     return NextResponse.json({ transaction }, { status: 201 });
@@ -213,6 +215,39 @@ export async function PUT(
 
     if (!id) {
       return NextResponse.json({ error: "ID de transacción requerido" }, { status: 400 });
+    }
+
+    const existing = await db.query.transactions.findFirst({
+      where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Transacción no encontrada" }, { status: 404 });
+    }
+
+    const oldStatus = existing.status;
+    const newStatus = data.status || oldStatus;
+    const oldAmount = parseFloat(existing.amount || "0");
+    const newAmount = data.amount !== undefined ? parseFloat(data.amount.toString()) : oldAmount;
+    const targetAccountId = data.accountId || existing.accountId;
+
+    if (oldStatus === "pending" && (newStatus === "cleared" || newStatus === "reconciled")) {
+      const account = await db.query.accounts.findFirst({
+        where: and(eq(accounts.id, targetAccountId), eq(accounts.householdId, householdId)),
+      });
+      if (account) {
+        const cur = parseFloat(account.balance || "0");
+        const diff = existing.type === "income" ? newAmount : existing.type === "expense" ? -newAmount : 0;
+        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+      }
+    } else if ((oldStatus === "cleared" || oldStatus === "reconciled") && newStatus === "pending") {
+      const account = await db.query.accounts.findFirst({
+        where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
+      });
+      if (account) {
+        const cur = parseFloat(account.balance || "0");
+        const diff = existing.type === "income" ? -oldAmount : existing.type === "expense" ? oldAmount : 0;
+        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+      }
     }
 
     const [updated] = await db
@@ -255,7 +290,7 @@ export async function DELETE(
       where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
     });
 
-    if (existing) {
+    if (existing && (existing.status === "cleared" || existing.status === "reconciled")) {
       const numAmount = parseFloat(existing.amount);
       if (existing.type === "expense") {
         await db
@@ -279,6 +314,11 @@ export async function DELETE(
           .where(eq(accounts.id, existing.toAccountId));
       }
 
+      await db
+        .update(transactions)
+        .set({ deletedAt: new Date() })
+        .where(eq(transactions.id, id));
+    } else if (existing) {
       await db
         .update(transactions)
         .set({ deletedAt: new Date() })

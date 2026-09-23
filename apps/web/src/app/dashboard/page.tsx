@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import {
   TrendingUp, TrendingDown, Wallet, ArrowUpDown,
   AlertCircle, CheckCircle2, ArrowRight,
-  Plus, UserPlus, CreditCard, Zap,
+  Plus, UserPlus, CreditCard, Zap, Clock,
 } from "lucide-react";
 import Link from "next/link";
 import { MonthlyCashflowChart } from "@/components/charts/MonthlyCashflowChart";
@@ -75,12 +75,18 @@ export default async function DashboardPage() {
   });
 
   const monthIncome = thisMonthTxs
-    .filter(t => t.type === "income")
+    .filter(t => t.type === "income" && t.status !== "pending")
     .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
 
   const monthExpense = thisMonthTxs
-    .filter(t => t.type === "expense")
+    .filter(t => t.type === "expense" && t.status !== "pending")
     .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+  const pendingIncomeTotal = txList
+    .filter(t => t.type === "income" && t.status === "pending")
+    .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+  const pendingIncomeCount = txList.filter(t => t.type === "income" && t.status === "pending").length;
 
   const netFlow = monthIncome - monthExpense;
 
@@ -210,7 +216,7 @@ export default async function DashboardPage() {
     },
   ];
 
-  const recentTransactions = txList.slice(0, 5).map(t => ({
+  const recentTransactions = txList.slice(0, 6).map(t => ({
     id: t.id,
     description: t.description,
     category: t.category?.name || "General",
@@ -218,6 +224,7 @@ export default async function DashboardPage() {
     date: new Date(t.date).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }),
     member: t.member?.displayName || "Hogar",
     type: t.type as "income" | "expense",
+    status: t.status as "cleared" | "pending" | "reconciled",
   }));
 
   const upcomingAlerts: Array<{ label: string; date: string; days: number; type: "warning" | "info" }> = accountsList
@@ -346,6 +353,66 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {/* ── Pending Receivables Banner ─────────────────────────────────── */}
+      {pendingIncomeTotal > 0 && (
+        <div
+          className="animate-fade-in-up"
+          style={{
+            background: "var(--color-warning-dim)",
+            border: "1px solid rgba(245, 158, 11, 0.3)",
+            borderRadius: "var(--radius-lg)",
+            padding: "1rem 1.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "1rem",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "0.875rem" }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: "var(--color-warning)",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Clock size={20} />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: "0.9375rem", margin: 0, color: "var(--text-primary)" }}>
+                Tienes {pendingIncomeCount} cobro{pendingIncomeCount === 1 ? "" : "s"} pendiente{pendingIncomeCount === 1 ? "" : "s"} por entrar ({fmtCurrency(pendingIncomeTotal)})
+              </p>
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: "0.125rem 0 0" }}>
+                Dinero pendiente de recibir de clientes o negocios. No afectará tu saldo bancario hasta que confirmes su cobro.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/dashboard/transactions?status=pending"
+            className="btn btn-primary btn-sm"
+            style={{
+              background: "var(--color-warning)",
+              borderColor: "var(--color-warning)",
+              color: "#fff",
+              fontWeight: 700,
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.375rem",
+            }}
+          >
+            Ver y Confirmar Cobros <ArrowRight size={14} />
+          </Link>
+        </div>
+      )}
+
       {/* ── Charts Row + Health Score ──────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 240px", gap: "1rem", alignItems: "stretch" }}>
         <MonthlyCashflowChart data={monthlyCashflowData} currency={defaultCurrency} />
@@ -468,7 +535,22 @@ export default async function DashboardPage() {
                   recentTransactions.map((tx) => (
                     <tr key={tx.id}>
                       <td>
-                        <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>{tx.description}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>{tx.description}</span>
+                          {tx.status === "pending" && (
+                            <span style={{
+                              fontSize: "0.6875rem",
+                              fontWeight: 700,
+                              background: "var(--color-warning-dim)",
+                              color: "var(--color-warning)",
+                              border: "1px solid var(--border-subtle)",
+                              padding: "0.1rem 0.4rem",
+                              borderRadius: 4,
+                            }}>
+                              ⏳ Por Cobrar
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <span className="chip">{tx.category}</span>
@@ -480,7 +562,7 @@ export default async function DashboardPage() {
                         {tx.date}
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <span className={tx.type === "income" ? "amount-income" : "amount-expense"}>
+                        <span className={tx.status === "pending" ? "" : (tx.type === "income" ? "amount-income" : "amount-expense")} style={{ color: tx.status === "pending" ? "var(--color-warning)" : undefined, fontWeight: 700 }}>
                           {tx.type === "income" ? "+" : "-"}
                           {fmtCurrency(Math.abs(tx.amount))}
                         </span>
