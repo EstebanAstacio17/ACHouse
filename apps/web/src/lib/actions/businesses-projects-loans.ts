@@ -563,10 +563,59 @@ export async function registerLoanPayment(loanId: string, data: {
   return { success: true, payment };
 }
 
+export async function updateLoan(id: string, data: Partial<{
+  name: string;
+  lenderType: "bank" | "person" | "internal_member";
+  lenderName: string | null;
+  lenderMemberId: string | null;
+  borrowerMemberId: string | null;
+  principalAmount: number;
+  remainingBalance: number;
+  interestRate: number;
+  interestType: "fixed" | "variable" | "none";
+  monthlyPayment: number | null;
+  startDate: string;
+  endDate: string | null;
+  currency: string;
+  accountId: string | null;
+}>) {
+  const { householdId } = await getAuthContext();
+
+  const updateData: any = {
+    updatedAt: new Date(),
+  };
+
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.lenderType !== undefined) updateData.lenderType = data.lenderType;
+  if (data.lenderName !== undefined) updateData.lenderName = data.lenderName;
+  if (data.lenderMemberId !== undefined) updateData.lenderMemberId = data.lenderMemberId;
+  if (data.borrowerMemberId !== undefined) updateData.borrowerMemberId = data.borrowerMemberId;
+  if (data.principalAmount !== undefined) updateData.principalAmount = data.principalAmount.toString();
+  if (data.remainingBalance !== undefined) updateData.remainingBalance = data.remainingBalance.toString();
+  if (data.interestRate !== undefined) updateData.interestRate = data.interestRate.toString();
+  if (data.interestType !== undefined) updateData.interestType = data.interestType;
+  if (data.monthlyPayment !== undefined) updateData.monthlyPayment = data.monthlyPayment !== null ? data.monthlyPayment.toString() : null;
+  if (data.startDate !== undefined) updateData.startDate = new Date(data.startDate);
+  if (data.endDate !== undefined) updateData.endDate = data.endDate ? new Date(data.endDate) : null;
+  if (data.currency !== undefined) updateData.currency = data.currency;
+  if (data.accountId !== undefined) updateData.accountId = data.accountId;
+
+  const [updated] = await db
+    .update(loans)
+    .set(updateData)
+    .where(and(eq(loans.id, id), eq(loans.householdId, householdId)))
+    .returning();
+
+  revalidatePath("/dashboard/loans");
+  revalidatePath("/dashboard");
+  return { success: true, loan: updated };
+}
+
 export async function deleteLoan(id: string) {
   const { householdId } = await getAuthContext();
   await db.update(loans).set({ deletedAt: new Date(), isActive: false }).where(and(eq(loans.id, id), eq(loans.householdId, householdId)));
   revalidatePath("/dashboard/loans");
+  revalidatePath("/dashboard");
   return { success: true };
 }
 

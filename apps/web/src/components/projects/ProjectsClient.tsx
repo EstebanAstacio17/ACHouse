@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { getProjects, createProject, updateProject, deleteProject, getBusinesses } from "@/lib/actions/businesses-projects-loans";
 import { getMembers } from "@/lib/actions/entities";
 import { formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 const STATUS_CONFIG = {
   active: { label: "Activo", color: "var(--color-income)", bg: "var(--color-income-dim)" },
@@ -82,11 +83,13 @@ function ProjectModal({
     onClose();
   };
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   return (
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(520px, 95vw)" }}>
         <div className="modal-header">
@@ -197,11 +200,13 @@ function CloseProjectModal({
   const isUnder = variance >= 0;
   const fmt = (n: number | string) => formatMoney(n, project.currency || "DOP");
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   return (
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(460px, 95vw)" }}>
         <div className="modal-header">

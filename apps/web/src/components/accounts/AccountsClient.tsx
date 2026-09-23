@@ -5,6 +5,7 @@ import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check
 import { useToast } from "@/components/ui/ToastContext";
 import { getAccounts, createAccount, updateAccount, deleteAccount } from "@/lib/actions/entities";
 import { CURRENCIES, formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 export interface AccountItem {
   id: string;
@@ -38,6 +39,7 @@ function AccountModal({
   onSave: (acc: Partial<AccountItem>) => void;
   initialData?: AccountItem | null;
 }) {
+  const safeBackdrop = useSafeBackdropClose(onClose);
   const [type, setType] = useState(initialData?.type ?? "checking");
   const [form, setForm] = useState({
     name: initialData?.name ?? "",
@@ -62,10 +64,10 @@ function AccountModal({
       balance: form.balance,
       currency: form.currency,
       isActive: true,
-      creditLimit: type === "credit" ? form.creditLimit : undefined,
+      creditLimit: type === "credit" && form.creditLimit ? form.creditLimit : undefined,
       statementDay: type === "credit" && form.statementDay ? parseInt(form.statementDay) : undefined,
       paymentDueDay: type === "credit" && form.paymentDueDay ? parseInt(form.paymentDueDay) : undefined,
-      minimumPayment: type === "credit" ? form.minimumPayment : undefined,
+      minimumPayment: type === "credit" && form.minimumPayment ? form.minimumPayment : undefined,
     });
     onClose();
   };
@@ -74,7 +76,7 @@ function AccountModal({
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(500px, 95vw)" }}>
         <div className="modal-header">

@@ -13,6 +13,7 @@ import * as XLSX from "xlsx";
 import { useToast } from "@/components/ui/ToastContext";
 import { useUser } from "@clerk/nextjs";
 import { formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "@/lib/actions/transactions";
 import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
 import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
@@ -211,78 +212,28 @@ function TransactionModal({
     return { businessCategories: bizCats, generalCategories: genCats };
   }, [categoriesList, businessesList, form.type]);
 
+  const backdropProps = useSafeBackdropClose(onClose);
+
   const handleCategoryChange = (newCatId: string) => {
-    const cat = categoriesList.find(c => c.id === newCatId);
-    let linkedBizId = form.businessId;
-    if (cat) {
-      const matchBiz = businessesList.find(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim());
-      if (matchBiz) {
-        linkedBizId = matchBiz.id;
-      } else {
-        const prevCat = categoriesList.find(c => c.id === form.categoryId);
-        if (prevCat && businessesList.some(b => b.name.toLowerCase().trim() === prevCat.name.toLowerCase().trim())) {
-          linkedBizId = "";
-        }
-      }
-    } else {
-      const prevCat = categoriesList.find(c => c.id === form.categoryId);
-      if (prevCat && businessesList.some(b => b.name.toLowerCase().trim() === prevCat.name.toLowerCase().trim())) {
-        linkedBizId = "";
-      }
-    }
     setForm(prev => ({
       ...prev,
       categoryId: newCatId,
-      businessId: linkedBizId,
     }));
   };
 
   const handleBusinessChange = (newBizId: string) => {
-    let linkedCatId = form.categoryId;
-    if (newBizId) {
-      const biz = businessesList.find(b => b.id === newBizId);
-      if (biz) {
-        const targetNorm = normalizeType(form.type);
-        const desiredType = targetNorm === "transfer" ? form.transferFlow : targetNorm;
-        const matchCat = categoriesList.find(
-          c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && normalizeType(c.type) === desiredType
-        );
-        if (matchCat) {
-          linkedCatId = matchCat.id;
-        }
-      }
-    } else {
-      const currentCat = categoriesList.find(c => c.id === form.categoryId);
-      if (currentCat && businessesList.some(b => b.name.toLowerCase().trim() === currentCat.name.toLowerCase().trim())) {
-        linkedCatId = "";
-      }
-    }
     setForm(prev => ({
       ...prev,
       businessId: newBizId,
-      categoryId: linkedCatId,
     }));
   };
 
   const handleTypeChange = (newType: "income" | "expense" | "transfer") => {
     const targetNorm = normalizeType(newType);
     setForm(prev => {
-      let newCatId = "";
-      if (prev.businessId) {
-        const biz = businessesList.find(b => b.id === prev.businessId);
-        if (biz) {
-          const desiredType = targetNorm === "transfer" ? prev.transferFlow : targetNorm;
-          const matchCat = categoriesList.find(
-            c => c.name.toLowerCase().trim() === biz.name.toLowerCase().trim() && normalizeType(c.type) === desiredType
-          );
-          if (matchCat) newCatId = matchCat.id;
-        }
-      }
-      if (!newCatId) {
-        const matchingCats = categoriesList.filter(c => targetNorm === "transfer" ? true : normalizeType(c.type) === targetNorm);
-        const stillValid = matchingCats.some(c => c.id === prev.categoryId);
-        newCatId = stillValid ? prev.categoryId : (matchingCats[0]?.id || "");
-      }
+      const matchingCats = categoriesList.filter(c => targetNorm === "transfer" ? true : normalizeType(c.type) === targetNorm);
+      const stillValid = matchingCats.some(c => c.id === prev.categoryId);
+      const newCatId = stillValid ? prev.categoryId : (matchingCats[0]?.id || "");
       return {
         ...prev,
         type: newType,
@@ -307,12 +258,8 @@ function TransactionModal({
     if (form.businessId) {
       return businessesList.find(b => b.id === form.businessId) || null;
     }
-    const cat = categoriesList.find(c => c.id === form.categoryId);
-    if (cat) {
-      return businessesList.find(b => b.name.toLowerCase().trim() === cat.name.toLowerCase().trim()) || null;
-    }
     return null;
-  }, [form.businessId, form.categoryId, businessesList, categoriesList]);
+  }, [form.businessId, businessesList]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -332,11 +279,7 @@ function TransactionModal({
     const selectedAcc = accountsList.find(a => a.id === form.accountId) || accountsList[0];
     const selectedToAcc = accountsList.find(a => a.id === form.toAccountId);
     const selectedMem = membersList.find(m => m.id === form.memberId) || (membersList.length > 0 ? membersList[0] : null);
-
-    let resolvedBiz = businessesList.find(b => b.id === form.businessId);
-    if (!resolvedBiz && selectedCat) {
-      resolvedBiz = businessesList.find(b => b.name.toLowerCase().trim() === selectedCat.name.toLowerCase().trim());
-    }
+    const selectedBiz = businessesList.find(b => b.id === form.businessId) || null;
 
     onSave({
       id: initialData?.id,
@@ -350,7 +293,7 @@ function TransactionModal({
       account: selectedAcc ? { id: selectedAcc.id, name: selectedAcc.name } : { name: "Principal" },
       toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
       member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
-      business: resolvedBiz ? { id: resolvedBiz.id, name: resolvedBiz.name } : null,
+      business: selectedBiz ? { id: selectedBiz.id, name: selectedBiz.name } : null,
       isRecurring: form.isRecurring,
       recurringFrequency: form.isRecurring ? form.recurringFrequency : undefined,
       attachmentUrl: form.attachmentUrl || null,
@@ -363,7 +306,7 @@ function TransactionModal({
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      {...backdropProps}
     >
       <div className="modal" style={{ width: "min(580px, 95vw)", maxHeight: "90vh", overflowY: "auto" }}>
         <div className="modal-header">
@@ -1113,7 +1056,8 @@ export function TransactionsClient() {
         <div
           className="overlay"
           style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setPreviewAttachment(null)}
+          onMouseDown={e => { if (e.target === e.currentTarget) (e.currentTarget as any)._safeClose = true; }}
+          onClick={e => { if (e.target === e.currentTarget && (e.currentTarget as any)._safeClose) setPreviewAttachment(null); }}
         >
           <div className="card" style={{ maxWidth: 600, padding: "1.5rem", position: "relative" }}>
             <button

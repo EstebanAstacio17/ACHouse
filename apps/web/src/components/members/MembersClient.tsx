@@ -16,6 +16,7 @@ import {
   deleteMemberIncomeSource,
 } from "@/lib/actions/entities";
 import { formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 const ROLE_CONFIG = {
   admin: { label: "Administrador", color: "var(--accent)", Icon: Shield, bg: "var(--accent-subtle)" },
@@ -107,6 +108,8 @@ function InviteModal({
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   if (inviteResult) {
     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
       `¡Hola ${inviteResult.name}! Te invito a unirte a nuestro hogar en ACHouse para gestionar juntos las finanzas. Haz clic aquí para entrar: ${activeUrl}`
@@ -121,7 +124,7 @@ function InviteModal({
       <div
         className="overlay"
         style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-        onClick={e => e.target === e.currentTarget && onClose()}
+        {...safeBackdrop}
       >
         <div className="modal" style={{ width: "min(490px, 95vw)" }}>
           <div className="modal-header">
@@ -201,7 +204,7 @@ function InviteModal({
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(480px, 95vw)" }}>
         <div className="modal-header">
@@ -339,11 +342,13 @@ function IncomeSourceModal({
     }
   };
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   return (
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(500px, 95vw)" }}>
         <div className="modal-header">

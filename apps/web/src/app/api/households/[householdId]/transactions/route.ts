@@ -136,7 +136,7 @@ export async function POST(
         accountId: d.accountId,
         toAccountId: d.type === "transfer" ? d.toAccountId : null,
         memberId: d.memberId || null,
-        categoryId: d.type !== "transfer" ? d.categoryId || null : null,
+        categoryId: d.categoryId || null,
         businessId: d.businessId || null,
         projectId: d.projectId || null,
         type: d.type,

@@ -4,15 +4,16 @@ import { useState, useMemo, useEffect } from "react";
 import {
   Plus, CreditCard, Banknote, User, Building2, Calendar, DollarSign,
   CheckCircle2, AlertCircle, ArrowRight, ArrowDownRight, Clock,
-  FileSpreadsheet, ShieldAlert, Check, X, AlertTriangle, Wallet, Trash2
+  FileSpreadsheet, ShieldAlert, Check, X, AlertTriangle, Wallet, Trash2, Pencil
 } from "lucide-react";
 import { format, addMonths } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
-import { getLoans, createLoan, registerLoanPayment, deleteLoan } from "@/lib/actions/businesses-projects-loans";
+import { getLoans, createLoan, updateLoan, registerLoanPayment, deleteLoan } from "@/lib/actions/businesses-projects-loans";
 import { getAccounts, createAccount, deleteAccount, updateAccount, getMembers } from "@/lib/actions/entities";
 import { createTransaction } from "@/lib/actions/transactions";
 import { formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 // ─── Types & Demo Data ─────────────────────────────────────────────────────────
 export interface LoanItem {
@@ -51,54 +52,60 @@ const PAYING_ACCOUNTS = [
   { id: "a1", name: "Cuenta Principal", balance: 0, currency: "DOP" },
 ];
 
-// ─── Modal: Nuevo Préstamo ─────────────────────────────────────────────────────
+// ─── Modal: Nuevo / Editar Préstamo ───────────────────────────────────────────
 function LoanModal({
   onClose,
   onSave,
   members = [],
+  initialData,
 }: {
   onClose: () => void;
   onSave: (loan: Partial<LoanItem>) => void;
   members?: Array<{ id: string; name: string }>;
+  initialData?: LoanItem | null;
 }) {
-  const [name, setName] = useState("");
-  const [lenderType, setLenderType] = useState<"bank" | "person" | "internal_member">("bank");
-  const [lenderName, setLenderName] = useState("");
-  const [borrowerName, setBorrowerName] = useState("");
-  const [principal, setPrincipal] = useState("");
-  const [currency, setCurrency] = useState("DOP");
-  const [rate, setRate] = useState("8.5");
+  const backdropProps = useSafeBackdropClose(onClose);
+  const [name, setName] = useState(initialData?.name ?? "");
+  const [lenderType, setLenderType] = useState<"bank" | "person" | "internal_member">(initialData?.lenderType ?? "bank");
+  const [lenderName, setLenderName] = useState(initialData?.lenderName ?? "");
+  const [borrowerName, setBorrowerName] = useState(initialData?.borrowerName ?? "");
+  const [principal, setPrincipal] = useState(initialData ? String(initialData.principalAmount) : "");
+  const [remainingBalance, setRemainingBalance] = useState(initialData ? String(initialData.remainingBalance) : "");
+  const [currency, setCurrency] = useState(initialData?.currency ?? "DOP");
+  const [rate, setRate] = useState(initialData ? String(initialData.interestRate) : "8.5");
   const [termMonths, setTermMonths] = useState("36");
-  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [startDate, setStartDate] = useState(initialData ? format(initialData.startDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"));
 
   const calculatedPayment = useMemo(() => {
     const p = parseFloat(principal);
     const r = (parseFloat(rate) || 0) / 100 / 12;
     const n = parseInt(termMonths, 10);
-    if (!p || !n) return 0;
+    if (!p || !n) return initialData?.monthlyPayment ?? 0;
     if (r === 0) return p / n;
     return (p * (r * Math.pow(1 + r, n))) / (Math.pow(1 + r, n) - 1);
-  }, [principal, rate, termMonths]);
+  }, [principal, rate, termMonths, initialData]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !principal) return;
 
     const p = parseFloat(principal);
+    const rem = remainingBalance ? parseFloat(remainingBalance) : p;
     const n = parseInt(termMonths, 10) || 12;
     const start = new Date(startDate);
     const end = addMonths(start, n);
 
     onSave({
+      id: initialData?.id,
       name,
       lenderType,
       lenderName: lenderType === "bank" || lenderType === "person" ? lenderName : lenderName || (members[0]?.name ?? null),
       borrowerName: lenderType === "internal_member" ? borrowerName || (members[1]?.name ?? members[0]?.name ?? null) : null,
       principalAmount: p,
-      remainingBalance: p,
+      remainingBalance: isNaN(rem) ? p : rem,
       interestRate: parseFloat(rate) || 0,
       interestType: parseFloat(rate) > 0 ? "fixed" : "none",
-      monthlyPayment: calculatedPayment,
+      monthlyPayment: calculatedPayment || initialData?.monthlyPayment || 0,
       startDate: start,
       endDate: end,
       currency,
@@ -107,10 +114,12 @@ function LoanModal({
   };
 
   return (
-    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} {...backdropProps}>
       <div className="modal" style={{ width: "min(520px, 95vw)" }}>
         <div className="modal-header">
-          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Registrar Préstamo</h2>
+          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>
+            {initialData ? "Editar Préstamo" : "Registrar Préstamo"}
+          </h2>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -175,6 +184,10 @@ function LoanModal({
                 <input className="input" type="number" step="0.01" required placeholder="0.00" value={principal} onChange={e => setPrincipal(e.target.value)} />
               </div>
               <div className="form-group">
+                <label className="label"><DollarSign size={12} style={{ display: "inline" }} />Saldo Restante</label>
+                <input className="input" type="number" step="0.01" placeholder={principal || "0.00"} value={remainingBalance} onChange={e => setRemainingBalance(e.target.value)} />
+              </div>
+              <div className="form-group">
                 <label className="label">Moneda</label>
                 <select className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
                   <option value="DOP">DOP (RD$)</option>
@@ -210,7 +223,9 @@ function LoanModal({
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary"><Check size={15} /> Guardar Préstamo</button>
+            <button type="submit" className="btn btn-primary">
+              <Check size={15} /> {initialData ? "Actualizar Préstamo" : "Guardar Préstamo"}
+            </button>
           </div>
         </form>
       </div>
@@ -218,20 +233,24 @@ function LoanModal({
   );
 }
 
-// ─── Modal: Nueva Tarjeta de Crédito ──────────────────────────────────────────
-function NewCardModal({
+// ─── Modal: Nueva / Editar Tarjeta de Crédito ─────────────────────────────────
+function CardModal({
   onClose,
   onSave,
+  initialData,
 }: {
   onClose: () => void;
   onSave: (card: Partial<CreditCardItem>) => void;
+  initialData?: CreditCardItem | null;
 }) {
-  const [name, setName] = useState("");
-  const [creditLimit, setCreditLimit] = useState("5000");
-  const [balance, setBalance] = useState("0");
-  const [statementDay, setStatementDay] = useState("15");
-  const [paymentDueDay, setPaymentDueDay] = useState("25");
-  const [minimumPayment, setMinimumPayment] = useState("50");
+  const backdropProps = useSafeBackdropClose(onClose);
+  const [name, setName] = useState(initialData?.name ?? "");
+  const [creditLimit, setCreditLimit] = useState(initialData ? String(initialData.creditLimit) : "5000");
+  const [balance, setBalance] = useState(initialData ? String(initialData.balance) : "0");
+  const [statementDay, setStatementDay] = useState(initialData?.statementDay ? String(initialData.statementDay) : "15");
+  const [paymentDueDay, setPaymentDueDay] = useState(initialData?.paymentDueDay ? String(initialData.paymentDueDay) : "25");
+  const [minimumPayment, setMinimumPayment] = useState(initialData?.minimumPayment ? String(initialData.minimumPayment) : "50");
+  const [currency, setCurrency] = useState(initialData?.currency ?? "USD");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,6 +260,7 @@ function NewCardModal({
     const debt = parseFloat(balance) || 0;
 
     onSave({
+      id: initialData?.id,
       name: name.trim(),
       creditLimit: limit,
       balance: debt,
@@ -248,7 +268,7 @@ function NewCardModal({
       statementDay: parseInt(statementDay, 10) || 15,
       paymentDueDay: parseInt(paymentDueDay, 10) || 25,
       minimumPayment: parseFloat(minimumPayment) || 50,
-      currency: "USD",
+      currency,
     });
     onClose();
   };
@@ -257,11 +277,13 @@ function NewCardModal({
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...backdropProps}
     >
       <div className="modal" style={{ width: "min(500px, 95vw)" }}>
         <div className="modal-header">
-          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Añadir Tarjeta de Crédito</h2>
+          <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>
+            {initialData ? "Editar Tarjeta de Crédito" : "Añadir Tarjeta de Crédito"}
+          </h2>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -341,22 +363,34 @@ function NewCardModal({
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="label">Pago Mínimo Estimado ($)</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                placeholder="50.00"
-                value={minimumPayment}
-                onChange={e => setMinimumPayment(e.target.value)}
-              />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              <div className="form-group">
+                <label className="label">Pago Mínimo Estimado ($)</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  placeholder="50.00"
+                  value={minimumPayment}
+                  onChange={e => setMinimumPayment(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="label">Moneda</label>
+                <select className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
+                  <option value="DOP">DOP (RD$)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="MXN">MXN ($)</option>
+                </select>
+              </div>
             </div>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary">
-              <Check size={15} /> Guardar Tarjeta
+            <button type="submit" className="btn btn-primary" style={{ gap: "0.375rem" }}>
+              <Check size={15} />
+              {initialData ? "Actualizar Tarjeta" : "Guardar Tarjeta"}
             </button>
           </div>
         </form>
@@ -377,6 +411,7 @@ function PayLoanModal({
   onPay: (loanId: string, amount: number, accountId: string) => void;
   accounts?: Array<{ id: string; name: string; balance: number; currency?: string }>;
 }) {
+  const backdropProps = useSafeBackdropClose(onClose);
   const [amount, setAmount] = useState(String(loan.monthlyPayment.toFixed(2)));
   const [accountId, setAccountId] = useState(accounts[0]?.id || "");
 
@@ -389,7 +424,7 @@ function PayLoanModal({
   };
 
   return (
-    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} {...backdropProps}>
       <div className="modal" style={{ width: "min(460px, 95vw)" }}>
         <div className="modal-header">
           <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Registrar Pago: {loan.name}</h2>
@@ -443,6 +478,7 @@ function PayCardModal({
   onPay: (cardId: string, amount: number, accountId: string) => void;
   accounts?: Array<{ id: string; name: string; balance: number; currency?: string }>;
 }) {
+  const backdropProps = useSafeBackdropClose(onClose);
   const [payType, setPayType] = useState<"total" | "minimum" | "custom">("total");
   const [customAmount, setCustomAmount] = useState("");
   const [accountId, setAccountId] = useState(accounts[0]?.id || "");
@@ -457,7 +493,7 @@ function PayCardModal({
   };
 
   return (
-    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} {...backdropProps}>
       <div className="modal" style={{ width: "min(480px, 95vw)" }}>
         <div className="modal-header">
           <h2 style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Pagar Tarjeta: {card.name}</h2>
@@ -539,6 +575,7 @@ function AmortizationTableModal({
   loan: LoanItem;
   onClose: () => void;
 }) {
+  const backdropProps = useSafeBackdropClose(onClose);
   const schedule = useMemo(() => {
     const list = [];
     let balance = loan.principalAmount;
@@ -564,7 +601,7 @@ function AmortizationTableModal({
   }, [loan]);
 
   return (
-    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="overlay" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} {...backdropProps}>
       <div className="modal" style={{ width: "min(680px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
         <div className="modal-header">
           <div>
@@ -624,6 +661,8 @@ export function LoansClient() {
   const [loading, setLoading] = useState(true);
   const [showNewLoanModal, setShowNewLoanModal] = useState(false);
   const [showNewCardModal, setShowNewCardModal] = useState(false);
+  const [editingLoan, setEditingLoan] = useState<LoanItem | null>(null);
+  const [editingCard, setEditingCard] = useState<CreditCardItem | null>(null);
   const [payingLoan, setPayingLoan] = useState<LoanItem | null>(null);
   const [payingCard, setPayingCard] = useState<CreditCardItem | null>(null);
   const [amortizationLoan, setAmortizationLoan] = useState<LoanItem | null>(null);
@@ -704,48 +743,84 @@ export function LoansClient() {
   const totalCardDebt = cards.reduce((sum, c) => sum + c.balance, 0);
   const totalCombinedDebt = totalLoanDebt + totalCardDebt;
 
-  const handleSaveLoan = async (newLoan: Partial<LoanItem>) => {
+  const handleSaveLoan = async (loanData: Partial<LoanItem>) => {
     try {
-      const lenderMember = members.find(m => m.name === newLoan.lenderName);
-      const borrowerMember = members.find(m => m.name === newLoan.borrowerName);
+      const lenderMember = members.find(m => m.name === loanData.lenderName);
+      const borrowerMember = members.find(m => m.name === loanData.borrowerName);
 
-      await createLoan({
-        name: newLoan.name!,
-        lenderType: newLoan.lenderType!,
-        lenderName: newLoan.lenderType !== "internal_member" ? (newLoan.lenderName || undefined) : undefined,
-        lenderMemberId: lenderMember?.id,
-        borrowerMemberId: borrowerMember?.id,
-        principalAmount: newLoan.principalAmount || 0,
-        interestRate: newLoan.interestRate,
-        interestType: newLoan.interestType,
-        monthlyPayment: newLoan.monthlyPayment,
-        startDate: newLoan.startDate ? newLoan.startDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
-        endDate: newLoan.endDate ? newLoan.endDate.toISOString().split("T")[0] : undefined,
-        currency: "USD",
-      });
-      toast.success("Préstamo registrado exitosamente");
+      if (loanData.id) {
+        await updateLoan(loanData.id, {
+          name: loanData.name!,
+          lenderType: loanData.lenderType!,
+          lenderName: loanData.lenderType !== "internal_member" ? (loanData.lenderName || null) : null,
+          lenderMemberId: lenderMember?.id || null,
+          borrowerMemberId: borrowerMember?.id || null,
+          principalAmount: loanData.principalAmount || 0,
+          remainingBalance: loanData.remainingBalance ?? loanData.principalAmount ?? 0,
+          interestRate: loanData.interestRate,
+          interestType: loanData.interestType,
+          monthlyPayment: loanData.monthlyPayment,
+          startDate: loanData.startDate ? loanData.startDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+          endDate: loanData.endDate ? loanData.endDate.toISOString().split("T")[0] : null,
+          currency: loanData.currency || "USD",
+        });
+        toast.success("Préstamo actualizado exitosamente");
+      } else {
+        await createLoan({
+          name: loanData.name!,
+          lenderType: loanData.lenderType!,
+          lenderName: loanData.lenderType !== "internal_member" ? (loanData.lenderName || undefined) : undefined,
+          lenderMemberId: lenderMember?.id,
+          borrowerMemberId: borrowerMember?.id,
+          principalAmount: loanData.principalAmount || 0,
+          interestRate: loanData.interestRate,
+          interestType: loanData.interestType,
+          monthlyPayment: loanData.monthlyPayment,
+          startDate: loanData.startDate ? loanData.startDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+          endDate: loanData.endDate ? loanData.endDate.toISOString().split("T")[0] : undefined,
+          currency: loanData.currency || "USD",
+        });
+        toast.success("Préstamo registrado exitosamente");
+      }
+      setShowNewLoanModal(false);
+      setEditingLoan(null);
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Error al crear préstamo");
+      toast.error(err.message || "Error al guardar préstamo");
     }
   };
 
-  const handleSaveCard = async (newCard: Partial<CreditCardItem>) => {
+  const handleSaveCard = async (cardData: Partial<CreditCardItem>) => {
     try {
-      await createAccount({
-        name: newCard.name!,
-        type: "credit",
-        balance: newCard.balance || 0,
-        currency: newCard.currency || "USD",
-        creditLimit: newCard.creditLimit,
-        statementDay: newCard.statementDay,
-        paymentDueDay: newCard.paymentDueDay,
-        minimumPayment: newCard.minimumPayment,
-      });
-      toast.success(`Tarjeta "${newCard.name}" añadida exitosamente`);
+      if (cardData.id) {
+        await updateAccount(cardData.id, {
+          name: cardData.name!,
+          balance: cardData.balance || 0,
+          creditLimit: cardData.creditLimit,
+          statementDay: cardData.statementDay,
+          paymentDueDay: cardData.paymentDueDay,
+          minimumPayment: cardData.minimumPayment,
+          currency: cardData.currency || "USD",
+        });
+        toast.success(`Tarjeta "${cardData.name}" actualizada exitosamente`);
+      } else {
+        await createAccount({
+          name: cardData.name!,
+          type: "credit",
+          balance: cardData.balance || 0,
+          currency: cardData.currency || "USD",
+          creditLimit: cardData.creditLimit,
+          statementDay: cardData.statementDay,
+          paymentDueDay: cardData.paymentDueDay,
+          minimumPayment: cardData.minimumPayment,
+        });
+        toast.success(`Tarjeta "${cardData.name}" añadida exitosamente`);
+      }
+      setShowNewCardModal(false);
+      setEditingCard(null);
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Error al crear tarjeta");
+      toast.error(err.message || "Error al guardar tarjeta");
     }
   };
 
@@ -834,8 +909,34 @@ export function LoansClient() {
 
   return (
     <>
-      {showNewLoanModal && <LoanModal onClose={() => setShowNewLoanModal(false)} onSave={handleSaveLoan} members={members} />}
-      {showNewCardModal && <NewCardModal onClose={() => setShowNewCardModal(false)} onSave={handleSaveCard} />}
+      {showNewLoanModal && (
+        <LoanModal
+          onClose={() => setShowNewLoanModal(false)}
+          onSave={handleSaveLoan}
+          members={members}
+        />
+      )}
+      {editingLoan && (
+        <LoanModal
+          initialData={editingLoan}
+          onClose={() => setEditingLoan(null)}
+          onSave={handleSaveLoan}
+          members={members}
+        />
+      )}
+      {showNewCardModal && (
+        <CardModal
+          onClose={() => setShowNewCardModal(false)}
+          onSave={handleSaveCard}
+        />
+      )}
+      {editingCard && (
+        <CardModal
+          initialData={editingCard}
+          onClose={() => setEditingCard(null)}
+          onSave={handleSaveCard}
+        />
+      )}
       {payingLoan && <PayLoanModal loan={payingLoan} onClose={() => setPayingLoan(null)} onPay={handlePayLoan} accounts={payingAccounts} />}
       {payingCard && <PayCardModal card={payingCard} onClose={() => setPayingCard(null)} onPay={handlePayCard} accounts={payingAccounts} />}
       {amortizationLoan && <AmortizationTableModal loan={amortizationLoan} onClose={() => setAmortizationLoan(null)} />}
@@ -850,11 +951,11 @@ export function LoansClient() {
           
           {/* Dynamic Button based on active Tab */}
           {tab === "loans" ? (
-            <button className="btn btn-primary" onClick={() => setShowNewLoanModal(true)}>
+            <button className="btn btn-primary" onClick={() => { setEditingLoan(null); setShowNewLoanModal(true); }}>
               <Plus size={16} /> Registrar Préstamo
             </button>
           ) : (
-            <button className="btn btn-primary" onClick={() => setShowNewCardModal(true)}>
+            <button className="btn btn-primary" onClick={() => { setEditingCard(null); setShowNewCardModal(true); }}>
               <Plus size={16} /> Añadir Tarjeta de Crédito
             </button>
           )}
@@ -899,7 +1000,7 @@ export function LoansClient() {
               <div className="empty-state-icon">🏦</div>
               <p className="empty-state-title">No hay préstamos registrados</p>
               <p className="empty-state-desc">Registra tus préstamos bancarios o deudas entre integrantes para seguir su amortización.</p>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowNewLoanModal(true)}>
+              <button className="btn btn-primary btn-sm" onClick={() => { setEditingLoan(null); setShowNewLoanModal(true); }}>
                 <Plus size={14} /> Registrar Primer Préstamo
               </button>
             </div>
@@ -907,7 +1008,7 @@ export function LoansClient() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.25rem" }}>
               {loans.map(loan => {
                 const paid = loan.principalAmount - loan.remainingBalance;
-                const pct = (paid / loan.principalAmount) * 100;
+                const pct = loan.principalAmount > 0 ? (paid / loan.principalAmount) * 100 : 0;
 
                 return (
                   <div key={loan.id} className="card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -928,11 +1029,11 @@ export function LoansClient() {
                     {/* Progress */}
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", marginBottom: "0.375rem" }}>
-                        <span style={{ color: "var(--text-secondary)" }}>Pagado: <strong style={{ color: "var(--text-primary)" }}>{fmt(paid)}</strong></span>
-                        <span style={{ fontWeight: 700, color: "var(--color-expense)" }}>Resta: {fmt(loan.remainingBalance)}</span>
+                        <span style={{ color: "var(--text-secondary)" }}>Pagado: <strong style={{ color: "var(--text-primary)" }}>{fmt(paid, loan.currency)}</strong></span>
+                        <span style={{ fontWeight: 700, color: "var(--color-expense)" }}>Resta: {fmt(loan.remainingBalance, loan.currency)}</span>
                       </div>
                       <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #16a34a 0%, var(--color-income) 100%)" }} />
+                        <div className="progress-fill" style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: "linear-gradient(90deg, #16a34a 0%, var(--color-income) 100%)" }} />
                       </div>
                     </div>
 
@@ -940,14 +1041,22 @@ export function LoansClient() {
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "0.75rem", borderTop: "1px solid var(--border-hair)" }}>
                       <div>
                         <p style={{ fontSize: "0.6875rem", color: "var(--text-tertiary)", textTransform: "uppercase" }}>Cuota Mensual</p>
-                        <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-primary)" }}>{fmt(loan.monthlyPayment)}</p>
+                        <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-primary)" }}>{fmt(loan.monthlyPayment, loan.currency)}</p>
                       </div>
                       <div style={{ display: "flex", gap: "0.375rem" }}>
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => setAmortizationLoan(loan)}
+                          title="Ver tabla de amortización"
                         >
                           <FileSpreadsheet size={13} /> Tabla
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-icon btn-sm"
+                          onClick={() => setEditingLoan(loan)}
+                          title="Editar préstamo"
+                        >
+                          <Pencil size={13} />
                         </button>
                         <button
                           className="btn btn-primary btn-sm"
@@ -979,7 +1088,7 @@ export function LoansClient() {
               <div className="empty-state-icon">💳</div>
               <p className="empty-state-title">No hay tarjetas de crédito registradas</p>
               <p className="empty-state-desc">Añade tus tarjetas para controlar límites, fechas de corte y pagos mínimos.</p>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowNewCardModal(true)}>
+              <button className="btn btn-primary btn-sm" onClick={() => { setEditingCard(null); setShowNewCardModal(true); }}>
                 <Plus size={14} /> Añadir Primera Tarjeta
               </button>
             </div>
@@ -998,10 +1107,17 @@ export function LoansClient() {
                         </div>
                         <div>
                           <h3 style={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "-0.01em" }}>{card.name}</h3>
-                          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Límite: {fmt(card.creditLimit)}</p>
+                          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Límite: {fmt(card.creditLimit, card.currency)}</p>
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: "0.375rem" }}>
+                        <button
+                          className="btn btn-secondary btn-icon btn-sm"
+                          onClick={() => setEditingCard(card)}
+                          title="Editar tarjeta"
+                        >
+                          <Pencil size={13} />
+                        </button>
                         <button className="btn btn-primary btn-sm" onClick={() => setPayingCard(card)}>
                           Pagar Tarjeta
                         </button>
@@ -1019,7 +1135,7 @@ export function LoansClient() {
                     {/* Utilization bar */}
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", marginBottom: "0.375rem" }}>
-                        <span style={{ color: "var(--text-secondary)" }}>Deuda actual: <strong style={{ color: "var(--color-expense)" }}>{fmt(card.balance)}</strong></span>
+                        <span style={{ color: "var(--text-secondary)" }}>Deuda actual: <strong style={{ color: "var(--color-expense)" }}>{fmt(card.balance, card.currency)}</strong></span>
                         <span style={{ fontWeight: 700, color: isHighUtil ? "var(--color-expense)" : "var(--text-secondary)" }}>
                           {utilPct.toFixed(0)}% utilizado
                         </span>

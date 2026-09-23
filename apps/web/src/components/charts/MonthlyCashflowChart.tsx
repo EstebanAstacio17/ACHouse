@@ -14,9 +14,7 @@ import {
 
 import { formatMoney } from "@/lib/geo";
 
-const MONTHLY_DATA: Array<{ month: string; ingresos: number; egresos: number; flujo: number }> = [];
-
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, currency = "DOP" }: any) => {
   if (active && payload && payload.length) {
     return (
       <div
@@ -29,7 +27,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         }}
       >
         <p style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: "0.375rem", fontSize: "0.875rem" }}>
-          {label} 2026
+          {label}
         </p>
         {payload.map((entry: any, index: number) => (
           <div
@@ -46,7 +44,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
           >
             <span>{entry.name}:</span>
             <span style={{ fontWeight: 700 }}>
-              {formatMoney(entry.value, "DOP")}
+              {formatMoney(entry.value, currency)}
             </span>
           </div>
         ))}
@@ -56,8 +54,22 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-export function MonthlyCashflowChart() {
+export interface MonthlyCashflowItem {
+  month: string;
+  ingresos: number;
+  egresos: number;
+  flujo: number;
+}
+
+interface MonthlyCashflowChartProps {
+  data?: MonthlyCashflowItem[];
+  currency?: string;
+}
+
+export function MonthlyCashflowChart({ data = [], currency = "DOP" }: MonthlyCashflowChartProps) {
   const [view, setView] = useState<"bar" | "grouped">("bar");
+
+  const hasData = data.length > 0 && data.some(d => d.ingresos > 0 || d.egresos > 0);
 
   return (
     <div className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -89,14 +101,14 @@ export function MonthlyCashflowChart() {
       </div>
 
       <div style={{ width: "100%", height: 280, marginTop: "0.5rem" }}>
-        {MONTHLY_DATA.length === 0 ? (
+        {!hasData ? (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", gap: "0.5rem", border: "1px dashed var(--border-subtle)", borderRadius: "var(--radius-lg)" }}>
             <p style={{ fontSize: "0.875rem", fontWeight: 600 }}>Sin datos de flujo mensual</p>
             <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>Registra transacciones para comparar ingresos vs egresos.</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={MONTHLY_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-hair)" vertical={false} />
               <XAxis
                 dataKey="month"
@@ -108,9 +120,9 @@ export function MonthlyCashflowChart() {
                 tickLine={false}
                 axisLine={{ stroke: "var(--border-hair)" }}
                 tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
-                tickFormatter={(v) => `$${v / 1000}k`}
+                tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={(props: any) => <CustomTooltip {...props} currency={currency} />} />
               <Legend
                 verticalAlign="top"
                 align="right"

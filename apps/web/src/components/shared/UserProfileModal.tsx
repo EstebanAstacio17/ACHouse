@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/ToastContext";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -31,7 +32,9 @@ export function UserProfileModal({
 }: UserProfileModalProps) {
   const router = useRouter();
   const toast = useToast();
+  const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const safeBackdrop = useSafeBackdropClose(onClose);
   const [household, setHousehold] = useState<{ name: string; currency: string; timezone: string } | null>(null);
 
   useEffect(() => {
@@ -112,9 +115,7 @@ export function UserProfileModal({
         boxSizing: "border-box",
         overflowY: "auto",
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      {...safeBackdrop}
     >
       <div
         onClick={(e) => e.stopPropagation()}

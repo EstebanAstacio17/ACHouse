@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { getBusinesses, createBusiness, updateBusiness, deleteBusiness } from "@/lib/actions/businesses-projects-loans";
 import { getMembers } from "@/lib/actions/entities";
 import { formatMoney } from "@/lib/geo";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 export interface BusinessItem {
   id: string;
@@ -81,11 +82,13 @@ function BusinessModal({
     );
   };
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   return (
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(520px, 95vw)" }}>
         <div className="modal-header">

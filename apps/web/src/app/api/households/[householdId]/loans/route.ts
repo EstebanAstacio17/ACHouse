@@ -116,6 +116,42 @@ export async function POST(
   }
 }
 
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ householdId: string }> }
+) {
+  const { householdId } = await params;
+  const authRes = await requireRole(householdId, ["admin", "contributor"]);
+  if ("error" in authRes) {
+    return NextResponse.json({ error: authRes.error }, { status: authRes.status });
+  }
+
+  try {
+    const body = await req.json();
+    const { id, ...data } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "ID de préstamo requerido" }, { status: 400 });
+    }
+
+    const [updated] = await db
+      .update(loans)
+      .set({
+        ...data,
+        startDate: data.startDate ? new Date(data.startDate) : undefined,
+        endDate: data.endDate ? new Date(data.endDate) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(loans.id, id), eq(loans.householdId, householdId)))
+      .returning();
+
+    return NextResponse.json({ loan: updated });
+  } catch (error) {
+    console.error("[PUT loan]", error);
+    return NextResponse.json({ error: "Error al actualizar préstamo" }, { status: 500 });
+  }
+}
+
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ householdId: string }> }

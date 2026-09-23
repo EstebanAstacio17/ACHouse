@@ -3,11 +3,18 @@
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import { formatMoney } from "@/lib/geo";
 
-const CATEGORY_DATA: Array<{ name: string; value: number; color: string }> = [];
+export interface CategoryDonutItem {
+  name: string;
+  value: number;
+  color: string;
+}
 
-const totalExpense = CATEGORY_DATA.reduce((acc, curr) => acc + curr.value, 0);
+interface CategoryDonutChartProps {
+  data?: CategoryDonutItem[];
+  currency?: string;
+}
 
-const CustomTooltip = ({ active, payload }: any) => {
+const CustomTooltip = ({ active, payload, totalExpense, currency = "DOP" }: any) => {
   if (active && payload && payload.length && totalExpense > 0) {
     const data = payload[0];
     const pct = ((data.value / totalExpense) * 100).toFixed(1);
@@ -25,7 +32,7 @@ const CustomTooltip = ({ active, payload }: any) => {
           {data.name}
         </p>
         <p style={{ fontSize: "0.8125rem", color: "var(--text-primary)", marginTop: "0.125rem" }}>
-          {formatMoney(data.value, "DOP")} ({pct}%)
+          {formatMoney(data.value, currency)} ({pct}%)
         </p>
       </div>
     );
@@ -33,7 +40,9 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-export function CategoryDonutChart() {
+export function CategoryDonutChart({ data = [], currency = "DOP" }: CategoryDonutChartProps) {
+  const totalExpense = data.reduce((acc, curr) => acc + curr.value, 0);
+
   return (
     <div className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div>
@@ -46,7 +55,7 @@ export function CategoryDonutChart() {
       </div>
 
       <div style={{ position: "relative", width: "100%", height: 220 }}>
-        {CATEGORY_DATA.length === 0 ? (
+        {data.length === 0 || totalExpense === 0 ? (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", gap: "0.5rem", border: "1px dashed var(--border-subtle)", borderRadius: "var(--radius-lg)" }}>
             <p style={{ fontSize: "0.875rem", fontWeight: 600 }}>Sin egresos este mes</p>
             <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>Los gastos por categoría aparecerán aquí.</p>
@@ -55,9 +64,9 @@ export function CategoryDonutChart() {
           <>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={(props: any) => <CustomTooltip {...props} totalExpense={totalExpense} currency={currency} />} />
                 <Pie
-                  data={CATEGORY_DATA}
+                  data={data}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
@@ -65,7 +74,7 @@ export function CategoryDonutChart() {
                   paddingAngle={4}
                   dataKey="value"
                 >
-                  {CATEGORY_DATA.map((entry, index) => (
+                  {data.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} stroke="transparent" />
                   ))}
                 </Pie>
@@ -84,7 +93,7 @@ export function CategoryDonutChart() {
             >
               <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Total</span>
               <span style={{ fontSize: "1.125rem", fontWeight: 800, color: "var(--text-primary)" }}>
-                ${(totalExpense / 1000).toFixed(1)}k
+                {totalExpense >= 1000 ? `$${(totalExpense / 1000).toFixed(1)}k` : formatMoney(totalExpense, currency)}
               </span>
             </div>
           </>
@@ -92,9 +101,9 @@ export function CategoryDonutChart() {
       </div>
 
       {/* Legend list */}
-      {CATEGORY_DATA.length > 0 && (
+      {data.length > 0 && totalExpense > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginTop: "0.25rem" }}>
-          {CATEGORY_DATA.slice(0, 4).map((c) => (
+          {data.slice(0, 4).map((c) => (
             <div key={c.name} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.75rem" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

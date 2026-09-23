@@ -24,12 +24,25 @@ const quickActions = [
   { label: "Ver Reportes",      icon: Zap,       href: "/dashboard/reports",      color: "var(--color-expense)",bg: "var(--color-expense-dim)" },
 ];
 
-/* ── Health Score (CSS-based arc) ──────────────────────────────────────── */
-const HEALTH_SCORE = 100;
-const CIRCUMFERENCE = 2 * Math.PI * 44;
-const DASH = (HEALTH_SCORE / 100) * CIRCUMFERENCE;
-
 /* ═══════════════════════════════════════════════════════════════════════════ */
+const CATEGORY_PALETTE = [
+  "var(--accent)",
+  "var(--color-expense)",
+  "var(--color-warning)",
+  "var(--color-income)",
+  "#8b5cf6",
+  "#06b6d4",
+  "#f43f5e",
+  "#eab308",
+  "#64748b",
+];
+
+const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const MONTH_FULL = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
+
 export default async function DashboardPage() {
   let accountsList: any[] = [];
   let txList: any[] = [];
@@ -70,6 +83,81 @@ export default async function DashboardPage() {
     .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
 
   const netFlow = monthIncome - monthExpense;
+
+  // Compute 6 months of historical cashflow
+  const monthlyCashflowData = Array.from({ length: 6 }).map((_, idx) => {
+    const d = new Date(currentYear, currentMonth - (5 - idx), 1);
+    const m = d.getMonth();
+    const y = d.getFullYear();
+    const label = `${MONTH_SHORT[m]} ${y.toString().slice(-2)}`;
+
+    const mIncome = txList
+      .filter(t => t.type === "income" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
+      .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+    const mExpense = txList
+      .filter(t => t.type === "expense" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
+      .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+
+    return {
+      month: label,
+      ingresos: mIncome,
+      egresos: mExpense,
+      flujo: mIncome - mExpense,
+    };
+  });
+
+  // Compute category expense breakdown
+  const categoryTotals: Record<string, number> = {};
+  thisMonthTxs
+    .filter(t => t.type === "expense")
+    .forEach(t => {
+      const catName = t.category?.name || "Otros";
+      categoryTotals[catName] = (categoryTotals[catName] || 0) + parseFloat(t.amount || "0");
+    });
+
+  const categoryExpenseData = Object.entries(categoryTotals)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value], idx) => ({
+      name,
+      value,
+      color: CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length],
+    }));
+
+  // Dynamic Financial Health Score
+  let healthScore = 100;
+  let healthLabel = "Excelente";
+  let healthDesc = "Listo para registrar tus primeros datos";
+
+  if (monthIncome > 0 || monthExpense > 0) {
+    if (monthIncome > 0) {
+      const savingsRate = netFlow / monthIncome;
+      if (savingsRate >= 0.3) {
+        healthScore = Math.min(100, Math.round(85 + savingsRate * 15));
+        healthLabel = "Excelente";
+        healthDesc = `Ahorro del ${(savingsRate * 100).toFixed(0)}% de tus ingresos`;
+      } else if (savingsRate >= 0.1) {
+        healthScore = Math.round(70 + (savingsRate - 0.1) * 75);
+        healthLabel = "Saludable";
+        healthDesc = `Ahorro del ${(savingsRate * 100).toFixed(0)}% este mes`;
+      } else if (savingsRate >= 0) {
+        healthScore = Math.round(60 + savingsRate * 100);
+        healthLabel = "Aceptable";
+        healthDesc = "Gastos equilibrados con ingresos";
+      } else {
+        healthScore = Math.max(25, Math.round(60 + savingsRate * 40));
+        healthLabel = "Déficit";
+        healthDesc = "Los egresos superan los ingresos este mes";
+      }
+    } else {
+      healthScore = 40;
+      healthLabel = "Atención";
+      healthDesc = "Egresos registrados sin ingresos este mes";
+    }
+  }
+
+  const CIRCUMFERENCE = 2 * Math.PI * 44;
+  const dash = (healthScore / 100) * CIRCUMFERENCE;
 
   const fmtCurrency = (n: number | string, curr = defaultCurrency) => {
     return formatMoney(n, curr);
@@ -155,7 +243,7 @@ export default async function DashboardPage() {
       >
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Septiembre 2026 · Mi Hogar</p>
+          <p className="page-subtitle">{MONTH_FULL[currentMonth]} {currentYear} · {household?.name || "Mi Hogar"}</p>
         </div>
 
         {/* Quick Actions */}
@@ -260,8 +348,8 @@ export default async function DashboardPage() {
 
       {/* ── Charts Row + Health Score ──────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 240px", gap: "1rem", alignItems: "stretch" }}>
-        <MonthlyCashflowChart />
-        <CategoryDonutChart />
+        <MonthlyCashflowChart data={monthlyCashflowData} currency={defaultCurrency} />
+        <CategoryDonutChart data={categoryExpenseData} currency={defaultCurrency} />
 
         {/* Financial Health Score */}
         <div
@@ -297,12 +385,12 @@ export default async function DashboardPage() {
                 stroke="url(#healthGrad)"
                 strokeWidth="8"
                 strokeLinecap="round"
-                strokeDasharray={`${DASH} ${CIRCUMFERENCE}`}
+                strokeDasharray={`${dash} ${CIRCUMFERENCE}`}
                 style={{ transition: "stroke-dasharray 1.2s var(--ease-apple)" }}
               />
               <defs>
                 <linearGradient id="healthGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="var(--color-income)" />
+                  <stop offset="0%" stopColor={healthScore >= 70 ? "var(--color-income)" : healthScore >= 50 ? "var(--color-warning)" : "var(--color-expense)"} />
                   <stop offset="100%" stopColor="var(--accent)" />
                 </linearGradient>
               </defs>
@@ -317,18 +405,23 @@ export default async function DashboardPage() {
               justifyContent: "center",
             }}>
               <span style={{ fontSize: "1.625rem", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}>
-                {HEALTH_SCORE}
+                {healthScore}
               </span>
               <span style={{ fontSize: "0.65rem", color: "var(--text-tertiary)", marginTop: 2 }}>/ 100</span>
             </div>
           </div>
 
           <div>
-            <p style={{ fontWeight: 700, fontSize: "0.875rem", color: "var(--color-income)", letterSpacing: "-0.015em" }}>
-              Excelente
+            <p style={{
+              fontWeight: 700,
+              fontSize: "0.875rem",
+              color: healthScore >= 70 ? "var(--color-income)" : healthScore >= 50 ? "var(--color-warning)" : "var(--color-expense)",
+              letterSpacing: "-0.015em"
+            }}>
+              {healthLabel}
             </p>
             <p style={{ fontSize: "0.73rem", color: "var(--text-tertiary)", marginTop: 2, lineHeight: 1.4 }}>
-              Listo para registrar tus primeros datos
+              {healthDesc}
             </p>
           </div>
         </div>

@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/ToastContext";
 import { getCategories, createCategory, updateCategory, deleteCategory } from "@/lib/actions/entities";
 import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
 import { CategoryIcon, POPULAR_CATEGORY_ICONS } from "./CategoryIcon";
+import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
 export interface CategoryChild {
   id: string;
@@ -71,11 +72,13 @@ function CategoryModal({
 
   const isSubcategory = Boolean(parent || (initialData && "parentId" in initialData && (initialData as any).parentId));
 
+  const safeBackdrop = useSafeBackdropClose(onClose);
+
   return (
     <div
       className="overlay"
       style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...safeBackdrop}
     >
       <div className="modal" style={{ width: "min(480px, 95vw)" }}>
         <div className="modal-header">
