@@ -3,6 +3,7 @@ import { LoansClient } from "@/components/loans/LoansClient";
 import { getLoans } from "@/lib/actions/businesses-projects-loans";
 import { getAccounts, getMembers } from "@/lib/actions/entities";
 
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Préstamos" };
 
 export default async function LoansPage() {

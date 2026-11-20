@@ -5,6 +5,7 @@ import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
 import { getBusinessList } from "@/lib/actions/businesses-projects-loans";
 import { getActiveHousehold } from "@/lib/household";
 
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Transacciones" };
 
 export default async function TransactionsPage() {

@@ -73,12 +73,13 @@ export default function RootLayout({
     </html>
   );
 
-  if (!hasValidClerkKey) {
-    return content;
-  }
+  const clerkPublishableKey = hasValidClerkKey
+    ? pubKey
+    : "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k";
 
   return (
     <ClerkProvider
+      publishableKey={clerkPublishableKey}
       appearance={{
         variables: {
           colorPrimary: "#4285F4",
