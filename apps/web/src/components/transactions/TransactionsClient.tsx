@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/geo";
 import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction, confirmPendingTransaction } from "@/lib/actions/transactions";
 import { getAccounts, getCategories, getMembers } from "@/lib/actions/entities";
-import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
+import { getBusinessList } from "@/lib/actions/businesses-projects-loans";
 
 // ─── Initial / Demo Data ───────────────────────────────────────────────────────
 export interface TransactionItem {
@@ -881,15 +881,75 @@ function TransactionModal({
   );
 }
 
-export function TransactionsClient() {
+interface TransactionsClientProps {
+  initialTransactions?: any[];
+  initialAccounts?: any[];
+  initialCategories?: any[];
+  initialMembers?: any[];
+  initialBusinesses?: any[];
+  initialCurrency?: string;
+}
+
+export function TransactionsClient({
+  initialTransactions,
+  initialAccounts,
+  initialCategories,
+  initialMembers,
+  initialBusinesses,
+  initialCurrency,
+}: TransactionsClientProps = {}) {
   const toast = useToast();
   const { user } = useUser();
-  const [householdCurrency, setHouseholdCurrency] = useState("DOP");
-  const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
-  const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
-  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string; type?: "income" | "expense" }>>([]);
-  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>>([]);
-  const [businessesList, setBusinessesList] = useState<Array<{ id: string; name: string; type?: string }>>([]);
+  const [householdCurrency, setHouseholdCurrency] = useState(initialCurrency || "DOP");
+  const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(() => {
+    if (initialTransactions && initialTransactions.length > 0) {
+      return initialTransactions.map((t: any) => {
+        let bizObj = t.business ? { id: t.business.id, name: t.business.name } : null;
+        if (!bizObj && t.category && initialBusinesses) {
+          const matchBiz = initialBusinesses.find(
+            (b: any) => b.name.toLowerCase().trim() === t.category.name.toLowerCase().trim()
+          );
+          if (matchBiz) {
+            bizObj = { id: matchBiz.id, name: matchBiz.name };
+          }
+        }
+        const txAcc = initialAccounts?.find((a: any) => a.id === t.accountId) || t.account;
+        const resolvedCurr = (t.currency && t.currency !== "USD") ? t.currency : (txAcc?.currency || "DOP");
+        return {
+          id: t.id,
+          description: t.description,
+          type: t.type as any,
+          amount: String(t.amount),
+          currency: resolvedCurr,
+          date: new Date(t.date),
+          status: t.status as any,
+          category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
+          account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
+          toAccount: (t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null) || (t.toAccountId && initialAccounts?.find((a: any) => a.id === t.toAccountId) ? { id: t.toAccountId, name: initialAccounts.find((a: any) => a.id === t.toAccountId)?.name } : null),
+          member: t.member ? { id: t.member.id, displayName: formatMemberName(t.member.displayName) } : null,
+          business: bizObj,
+          conceptType: t.conceptType || null,
+          costBreakdown: t.costBreakdown || null,
+          quoteId: t.quoteId || null,
+          isRecurring: t.isRecurring,
+          notes: t.notes,
+        };
+      });
+    }
+    return INITIAL_TRANSACTIONS;
+  });
+  const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>(() => {
+    return initialAccounts ? initialAccounts.map((a: any) => ({ id: a.id, name: a.name, currency: a.currency })) : [];
+  });
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; color: string; type?: "income" | "expense" }>>(() => {
+    return initialCategories ? initialCategories.map((c: any) => ({ id: c.id, name: c.name, color: c.color, type: c.type })) : [];
+  });
+  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string; clerkUserId?: string; isCurrentUser?: boolean }>>(() => {
+    return initialMembers ? initialMembers.map((m: any) => ({ id: m.id, displayName: m.displayName || "Integrante", clerkUserId: m.clerkUserId })) : [];
+  });
+  const [businessesList, setBusinessesList] = useState<Array<{ id: string; name: string; type?: string }>>(() => {
+    return initialBusinesses ? initialBusinesses.map((b: any) => ({ id: b.id, name: b.name, type: b.type })) : [];
+  });
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionItem | null>(null);
   const [confirmingItem, setConfirmingItem] = useState<TransactionItem | null>(null);
@@ -1007,6 +1067,12 @@ export function TransactionsClient() {
 
   useEffect(() => {
     let active = true;
+
+    // If pre-fetched server props were passed, skip client fetch waterfall
+    if (initialTransactions !== undefined) {
+      return () => { active = false; };
+    }
+
     fetch("/api/households")
       .then(r => r.ok ? r.json() : null)
       .then(d => {
@@ -1025,7 +1091,7 @@ export function TransactionsClient() {
       getAccounts(),
       getCategories(),
       getMembers(),
-      getBusinesses(),
+      getBusinessList(),
     ]).then(([txs, accs, cats, mems, bizs]) => {
       if (!active) return;
       if (accs) {

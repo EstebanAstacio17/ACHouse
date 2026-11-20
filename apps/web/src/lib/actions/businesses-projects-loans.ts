@@ -30,6 +30,15 @@ async function getAuthContext(requireWrite = false) {
 
 // ── Businesses ────────────────────────────────────────────────────────────────
 
+export async function getBusinessList() {
+  const { householdId } = await getAuthContext();
+  return db.query.businesses.findMany({
+    where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
+    columns: { id: true, name: true, type: true },
+    orderBy: (b, { asc }) => [asc(b.name)],
+  });
+}
+
 export async function getBusinesses() {
   const { householdId } = await getAuthContext();
 
@@ -363,7 +372,7 @@ export async function createBusiness(data: {
     revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
-  } catch {}
+  } catch { }
 
   return { success: true, business: biz };
 }
@@ -475,7 +484,7 @@ export async function updateBusiness(
     revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
-  } catch {}
+  } catch { }
 
   return { success: true };
 }
@@ -525,7 +534,7 @@ export async function deleteBusiness(id: string) {
     revalidatePath("/dashboard/members");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
-  } catch {}
+  } catch { }
 
   return { success: true };
 }
@@ -604,7 +613,7 @@ export async function createProject(data: {
 }
 
 export async function updateProject(id: string, data: Partial<{
-  name: string; description: string; budget: number; status: "active"|"paused"|"completed"|"cancelled"; endDate: string;
+  name: string; description: string; budget: number; status: "active" | "paused" | "completed" | "cancelled"; endDate: string;
 }>) {
   const { householdId } = await getAuthContext();
   await db.update(projects).set({
@@ -636,9 +645,9 @@ export async function getLoans() {
 }
 
 export async function createLoan(data: {
-  name: string; lenderType: "bank"|"person"|"internal_member"; lenderName?: string;
+  name: string; lenderType: "bank" | "person" | "internal_member"; lenderName?: string;
   lenderMemberId?: string; borrowerMemberId?: string; principalAmount: number;
-  interestRate?: number; interestType?: "fixed"|"variable"|"none";
+  interestRate?: number; interestType?: "fixed" | "variable" | "none";
   monthlyPayment?: number; startDate: string; endDate?: string; currency?: string; accountId?: string;
 }) {
   const { householdId } = await getAuthContext();

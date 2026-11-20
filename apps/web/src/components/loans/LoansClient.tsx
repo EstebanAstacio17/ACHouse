@@ -651,15 +651,82 @@ function AmortizationTableModal({
   );
 }
 
+interface LoansClientProps {
+  initialLoans?: any[];
+  initialAccounts?: any[];
+  initialMembers?: any[];
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
-export function LoansClient() {
+export function LoansClient({
+  initialLoans,
+  initialAccounts,
+  initialMembers,
+}: LoansClientProps = {}) {
   const toast = useToast();
   const [tab, setTab] = useState<"loans" | "cards">("loans");
-  const [loans, setLoans] = useState<LoanItem[]>(INITIAL_LOANS);
-  const [cards, setCards] = useState<CreditCardItem[]>(INITIAL_CARDS);
-  const [payingAccounts, setPayingAccounts] = useState<Array<{ id: string; name: string; balance: number }>>([]);
-  const [members, setMembers] = useState<Array<{ id: string; name: string }>>([]);
-  const [loading, setLoading] = useState(true);
+  const [loans, setLoans] = useState<LoanItem[]>(() => {
+    if (initialLoans) {
+      return initialLoans.map((l: any) => ({
+        id: l.id,
+        name: l.name,
+        lenderType: l.lenderType,
+        lenderName: l.lenderName || (l.lenderMember?.displayName ?? null),
+        borrowerName: l.borrowerMember?.displayName ?? null,
+        principalAmount: parseFloat(l.principalAmount ?? "0"),
+        remainingBalance: parseFloat(l.remainingBalance ?? "0"),
+        interestRate: parseFloat(l.interestRate ?? "0"),
+        interestType: l.interestType ?? "fixed",
+        monthlyPayment: parseFloat(l.monthlyPayment ?? "0"),
+        startDate: new Date(l.startDate),
+        endDate: l.endDate ? new Date(l.endDate) : new Date(l.startDate),
+        currency: l.currency ?? "USD",
+        isActive: l.isActive !== false,
+      }));
+    }
+    return INITIAL_LOANS;
+  });
+  const [cards, setCards] = useState<CreditCardItem[]>(() => {
+    if (initialAccounts) {
+      const creditAccounts = initialAccounts.filter((a: any) => a.type === "credit");
+      return creditAccounts.map((c: any) => {
+        const limit = parseFloat(c.creditLimit ?? "5000");
+        const rawBal = parseFloat(c.balance ?? "0");
+        const debt = rawBal < 0 ? Math.abs(rawBal) : (rawBal > 0 ? rawBal : 0);
+        return {
+          id: c.id,
+          name: c.name,
+          balance: debt,
+          creditLimit: limit,
+          availableCredit: parseFloat(c.availableCredit ?? String(Math.max(0, limit - debt))),
+          statementDay: c.statementDay ?? 15,
+          paymentDueDay: c.paymentDueDay ?? 25,
+          minimumPayment: parseFloat(c.minimumPayment ?? "50"),
+          currency: c.currency ?? "DOP",
+        };
+      });
+    }
+    return INITIAL_CARDS;
+  });
+  const [payingAccounts, setPayingAccounts] = useState<Array<{ id: string; name: string; balance: number }>>(() => {
+    if (initialAccounts) {
+      return initialAccounts
+        .filter((a: any) => a.isActive !== false)
+        .map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          balance: parseFloat(a.balance ?? "0"),
+        }));
+    }
+    return [];
+  });
+  const [members, setMembers] = useState<Array<{ id: string; name: string }>>(() => {
+    if (initialMembers) {
+      return initialMembers.map((m: any) => ({ id: m.id, name: m.displayName || "Integrante" }));
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(initialLoans === undefined);
   const [showNewLoanModal, setShowNewLoanModal] = useState(false);
   const [showNewCardModal, setShowNewCardModal] = useState(false);
   const [editingLoan, setEditingLoan] = useState<LoanItem | null>(null);
@@ -736,7 +803,9 @@ export function LoansClient() {
   };
 
   useEffect(() => {
-    loadData();
+    if (initialLoans === undefined) {
+      loadData();
+    }
   }, []);
 
   const fmt = (n: number | string, currency = "DOP") => {
