@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireRole } from "@/lib/auth-guard";
 import { getHouseholdNotifications } from "@/lib/actions/notifications";
 
 export async function GET(
@@ -7,19 +7,18 @@ export async function GET(
   { params }: { params: Promise<{ householdId: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    const { householdId } = await params;
+    const authRes = await requireRole(householdId, ["admin", "contributor", "viewer"]);
+    if ("error" in authRes) {
+      return NextResponse.json({ error: authRes.error }, { status: authRes.status });
     }
 
-    const { householdId } = await params;
     const result = await getHouseholdNotifications(householdId);
-
     return NextResponse.json(result);
   } catch (error: any) {
     console.error("Error in GET /api/households/[householdId]/notifications:", error);
     return NextResponse.json(
-      { error: "Error al obtener notificaciones", details: error.message },
+      { error: "Error al obtener notificaciones" },
       { status: 500 }
     );
   }

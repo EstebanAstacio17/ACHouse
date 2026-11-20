@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { getActiveHouseholdId } from "@/lib/household";
+import { getTenantContext, requireWriter } from "@/lib/tenant";
 
 async function resolveBaseUrl(): Promise<string> {
   // 1. Check request headers from incoming request
@@ -40,25 +41,9 @@ async function resolveBaseUrl(): Promise<string> {
   return envUrl || "http://localhost:3000";
 }
 
-async function getAuthContext() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("No autenticado");
-  const householdId = await getActiveHouseholdId();
-  if (!householdId) throw new Error("No hay hogar activo seleccionado");
-
-  const currentMember = await db.query.householdMembers.findFirst({
-    where: and(
-      eq(householdMembers.clerkUserId, userId),
-      eq(householdMembers.householdId, householdId),
-      eq(householdMembers.isActive, true)
-    ),
-  });
-
-  if (!currentMember) {
-    throw new Error("No tienes acceso activo a este hogar");
-  }
-
-  return { userId, householdId, currentMember, role: currentMember.role };
+async function getAuthContext(requireWrite = false) {
+  const ctx = requireWrite ? await requireWriter() : await getTenantContext();
+  return { userId: ctx.userId, householdId: ctx.householdId, currentMember: ctx.member, role: ctx.role };
 }
 
 // ── Categories ───────────────────────────────────────────────────────────────

@@ -15,35 +15,28 @@ import { z } from "zod";
 import { transactionSchema } from "@achouse/types";
 import { getActiveHouseholdId } from "@/lib/household";
 import { createId } from "@paralleldrive/cuid2";
+import { getTenantContext, requireWriter } from "@/lib/tenant";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-async function getAuthenticatedMember() {
+async function getAuthenticatedMember(requireWrite = false) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return { userId: null, householdId: null, member: null, error: "No autorizado" };
-    }
-    const householdId = await getActiveHouseholdId();
-    if (!householdId) {
-      return { userId, householdId: null, member: null, error: "No hay hogar activo seleccionado" };
-    }
-
-    const member = await db.query.householdMembers.findFirst({
-      where: and(
-        eq(householdMembers.clerkUserId, userId),
-        eq(householdMembers.householdId, householdId),
-        eq(householdMembers.isActive, true)
-      ),
-    });
-
-    if (!member) {
-      return { userId, householdId, member: null, error: "No tienes acceso activo a este hogar" };
-    }
-
-    return { userId, householdId, member, error: null };
+    const ctx = requireWrite ? await requireWriter() : await getTenantContext();
+    return {
+      userId: ctx.userId,
+      householdId: ctx.householdId,
+      member: ctx.member,
+      role: ctx.role,
+      error: null,
+    };
   } catch (err: any) {
-    return { userId: null, householdId: null, member: null, error: err?.message || "Error de autenticación" };
+    return {
+      userId: null,
+      householdId: null,
+      member: null,
+      role: null,
+      error: err?.message || "No autorizado o sin permisos suficientes",
+    };
   }
 }
 
@@ -124,7 +117,7 @@ export async function getTransactions(filters?: {
 
 export async function createTransaction(data: z.input<typeof transactionSchema>) {
   try {
-    const authCtx = await getAuthenticatedMember();
+    const authCtx = await getAuthenticatedMember(true);
     if (authCtx.error || !authCtx.householdId || !authCtx.userId) {
       return { success: false, error: authCtx.error || "No autorizado o sin hogar activo" };
     }
@@ -318,7 +311,7 @@ export async function confirmPendingTransaction(
   }
 ) {
   try {
-    const authCtx = await getAuthenticatedMember();
+    const authCtx = await getAuthenticatedMember(true);
     if (authCtx.error || !authCtx.householdId) {
       return { success: false, error: authCtx.error || "No autorizado" };
     }
@@ -404,7 +397,7 @@ export async function confirmPendingTransaction(
 
 export async function updateTransaction(id: string, data: Partial<z.infer<typeof transactionSchema>>) {
   try {
-    const authCtx = await getAuthenticatedMember();
+    const authCtx = await getAuthenticatedMember(true);
     if (authCtx.error || !authCtx.householdId) {
       return { success: false, error: authCtx.error || "No autorizado" };
     }
@@ -542,7 +535,7 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
 
 export async function deleteTransaction(id: string) {
   try {
-    const authCtx = await getAuthenticatedMember();
+    const authCtx = await getAuthenticatedMember(true);
     if (authCtx.error || !authCtx.householdId) {
       return { success: false, error: authCtx.error || "No autorizado" };
     }

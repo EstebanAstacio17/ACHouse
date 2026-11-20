@@ -13,6 +13,7 @@ import {
 } from "@achouse/db/schema";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { getActiveHouseholdId } from "@/lib/household";
+import { getHouseholdAuth } from "@/lib/auth-guard";
 
 export interface PlatformNotification {
   id: string;
@@ -113,7 +114,22 @@ export async function getHouseholdNotifications(customHouseholdId?: string): Pro
   error?: string;
 }> {
   try {
-    const householdId = customHouseholdId || (await getActiveHouseholdId());
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, notifications: [], unreadCount: 0, error: "No autorizado" };
+    }
+
+    let householdId: string;
+    if (customHouseholdId) {
+      const authCtx = await getHouseholdAuth(customHouseholdId);
+      if (!authCtx) {
+        return { success: false, notifications: [], unreadCount: 0, error: "No tienes acceso a este hogar" };
+      }
+      householdId = customHouseholdId;
+    } else {
+      householdId = await getActiveHouseholdId();
+    }
+
     if (!householdId) {
       return { success: false, notifications: [], unreadCount: 0, error: "No household selected" };
     }
