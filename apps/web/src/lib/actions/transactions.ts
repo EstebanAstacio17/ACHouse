@@ -185,7 +185,7 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
         // If category is not set, or if category doesn't match business, find the matching business category
         const targetType = parsed.type === "income" ? "income" : "expense";
         const currentCat = categoryId ? householdCats.find(c => c.id === categoryId) : null;
-        
+
         // If no category was selected or the current category is not for this business and type
         if (!currentCat) {
           const matchingCat = householdCats.find(
