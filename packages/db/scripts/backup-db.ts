@@ -3,14 +3,14 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 // Load environment variables from apps/web/.env.local, .env.local or .env in the monorepo root
-const rootPath = path.resolve(__dirname, "../../..");
+const rootPath = process.cwd();
 dotenv.config({ path: path.join(rootPath, "apps/web/.env.local") });
 dotenv.config({ path: path.join(rootPath, ".env.local") });
 dotenv.config({ path: path.join(rootPath, ".env") });
 
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import * as schema from "../schema";
+import * as schema from "../schema/index.ts";
 
 async function runBackup() {
   const connectionString = process.env.DATABASE_URL;
@@ -42,6 +42,8 @@ async function runBackup() {
       loanPaymentsData,
       reconciliationData,
       auditLogData,
+      catalogItemsData,
+      quotesData,
     ] = await Promise.all([
       db.select().from(schema.households),
       db.select().from(schema.householdMembers),
@@ -58,6 +60,8 @@ async function runBackup() {
       db.select().from(schema.loanPayments),
       db.select().from(schema.reconciliationEntries),
       db.select().from(schema.auditLog),
+      db.select().from(schema.businessCatalogItems),
+      db.select().from(schema.businessQuotes),
     ]);
 
     const backupData = {
@@ -77,6 +81,8 @@ async function runBackup() {
           loans: loansData.length,
           loanPayments: loanPaymentsData.length,
           reconciliationEntries: reconciliationData.length,
+          catalogItems: catalogItemsData.length,
+          quotes: quotesData.length,
         },
       },
       data: {
@@ -95,6 +101,8 @@ async function runBackup() {
         loanPayments: loanPaymentsData,
         reconciliationEntries: reconciliationData,
         auditLog: auditLogData,
+        catalogItems: catalogItemsData,
+        quotes: quotesData,
       },
     };
 
