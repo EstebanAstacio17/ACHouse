@@ -845,27 +845,17 @@ export function LoansClient() {
       const loan = loans.find(l => l.id === loanId);
       const isSettling = loan ? (loan.remainingBalance - amount <= 0.01) : false;
 
-      await registerLoanPayment(loanId, {
+      const res = await registerLoanPayment(loanId, {
         amount,
         principalPaid: amount,
         interestPaid: 0,
         date: new Date().toISOString().split("T")[0],
         notes: isSettling ? "Pago final - Préstamo saldado" : "Abono cuota préstamo",
+        accountId: accountId || undefined,
       });
 
-      if (accountId) {
-        const loanDesc = loan ? `${loan.name}${loan.lenderName ? ` (${loan.lenderName})` : ""}` : "Préstamo";
-        const txRes = await createTransaction({
-          accountId,
-          type: "expense",
-          amount,
-          description: `Pago Préstamo: ${loanDesc}`,
-          conceptType: "loan_payment",
-          date: new Date().toISOString().split("T")[0],
-        });
-        if (txRes && !txRes.success) {
-          throw new Error(txRes.error || "Error al registrar la transacción del préstamo");
-        }
+      if (res && !res.success) {
+        throw new Error((res as any).error || "Error al procesar pago");
       }
 
       if (isSettling) {

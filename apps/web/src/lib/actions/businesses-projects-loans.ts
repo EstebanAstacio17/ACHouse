@@ -20,8 +20,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getActiveHouseholdId } from "@/lib/household";
 import { createId } from "@paralleldrive/cuid2";
-import { syncBusinessCategories } from "./entities";
 import { getTenantContext, requireWriter } from "@/lib/tenant";
+import { buildBalanceAdjustment, buildAuditEntry } from "@/lib/ledger";
 
 async function getAuthContext(requireWrite = false) {
   const ctx = requireWrite ? await requireWriter() : await getTenantContext();
@@ -32,7 +32,6 @@ async function getAuthContext(requireWrite = false) {
 
 export async function getBusinesses() {
   const { householdId } = await getAuthContext();
-  await syncBusinessCategories(householdId);
 
   const [bizList, txs, cats, membersList, allQuotes] = await Promise.all([
     db.query.businesses.findMany({
@@ -665,9 +664,14 @@ export async function createLoan(data: {
 }
 
 export async function registerLoanPayment(loanId: string, data: {
-  amount: number; principalPaid: number; interestPaid: number; date: string; notes?: string;
+  amount: number;
+  principalPaid: number;
+  interestPaid: number;
+  date: string;
+  notes?: string;
+  accountId?: string;
 }) {
-  const { householdId, role } = await getAuthContext();
+  const { householdId, currentMember, role, userId } = await getAuthContext(true);
   if (role === "viewer") {
     throw new Error("Los usuarios con rol lector no pueden registrar pagos de préstamos");
   }
@@ -677,27 +681,83 @@ export async function registerLoanPayment(loanId: string, data: {
   });
   if (!loan) throw new Error("Préstamo no encontrado en este hogar");
 
-  const [payment] = await db.insert(loanPayments).values({
-    loanId,
-    amount: data.amount.toString(),
-    principalPaid: data.principalPaid.toString(),
-    interestPaid: data.interestPaid.toString(),
-    date: new Date(data.date),
-    notes: data.notes ?? null,
-  }).returning();
-
   const newBalance = Math.max(0, parseFloat(loan.remainingBalance) - data.principalPaid);
   const isSettled = newBalance <= 0.001;
-  await db
-    .update(loans)
-    .set({
-      remainingBalance: newBalance.toFixed(2),
-      isActive: !isSettled,
-      updatedAt: new Date(),
+
+  const paymentId = createId();
+  const txId = data.accountId ? createId() : null;
+  const batchStatements: any[] = [];
+
+  // 1. Si se especificó cuenta de pago, registrar transacción y ajuste de balance atómicamente
+  if (data.accountId && txId) {
+    const loanNameDesc = `${loan.name}${loan.lenderName ? ` (${loan.lenderName})` : ""}`;
+    batchStatements.push(
+      db.insert(transactions).values({
+        id: txId,
+        householdId,
+        accountId: data.accountId,
+        memberId: currentMember?.id || null,
+        type: "expense",
+        amount: data.amount.toString(),
+        currency: loan.currency || "DOP",
+        description: `Pago Préstamo: ${loanNameDesc}`,
+        conceptType: "loan_payment",
+        status: "cleared",
+        date: new Date(data.date),
+        createdBy: userId,
+      })
+    );
+    batchStatements.push(buildBalanceAdjustment(householdId, data.accountId, `-${data.amount.toFixed(2)}`));
+  }
+
+  // 2. Registro del pago de amortización
+  batchStatements.push(
+    db
+      .insert(loanPayments)
+      .values({
+        id: paymentId,
+        loanId,
+        transactionId: txId,
+        amount: data.amount.toString(),
+        principalPaid: data.principalPaid.toString(),
+        interestPaid: data.interestPaid.toString(),
+        date: new Date(data.date),
+        notes: data.notes ?? null,
+      })
+      .returning()
+  );
+
+  // 3. Actualización de saldo del préstamo
+  batchStatements.push(
+    db
+      .update(loans)
+      .set({
+        remainingBalance: newBalance.toFixed(2),
+        isActive: !isSettled,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(loans.id, loanId), eq(loans.householdId, householdId)))
+  );
+
+  // 4. Registro de auditoría
+  batchStatements.push(
+    buildAuditEntry({
+      householdId,
+      memberId: currentMember?.id,
+      action: "create",
+      entityType: "loan_payment",
+      entityId: paymentId,
+      newValues: { loanId, amount: data.amount, newBalance: newBalance.toFixed(2) },
     })
-    .where(and(eq(loans.id, loanId), eq(loans.householdId, householdId)));
+  );
+
+  const results = await db.batch(batchStatements as any);
+  const paymentIndex = data.accountId ? 2 : 0;
+  const payment = (results[paymentIndex] as any)?.[0] || { id: paymentId, amount: data.amount };
 
   revalidatePath("/dashboard/loans");
+  revalidatePath("/dashboard/transactions");
+  revalidatePath("/dashboard");
   return { success: true, payment };
 }
 

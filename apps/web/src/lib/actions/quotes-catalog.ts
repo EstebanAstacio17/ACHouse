@@ -22,6 +22,7 @@ import {
   type BusinessQuote,
 } from "@achouse/types";
 import { getTenantContext, requireWriter } from "@/lib/tenant";
+import { buildBalanceAdjustment, buildAuditEntry } from "@/lib/ledger";
 
 async function getAuthContext(requireWrite = false) {
   const ctx = requireWrite ? await requireWriter() : await getTenantContext();
@@ -466,7 +467,7 @@ export async function recordQuotePayment(
     notes?: string;
   }
 ) {
-  const { householdId, currentMember, userId } = await getAuthContext();
+  const { householdId, currentMember, userId } = await getAuthContext(true);
 
   const quote = await db.query.businessQuotes.findFirst({
     where: and(eq(businessQuotes.id, quoteId), eq(businessQuotes.householdId, householdId)),
@@ -496,9 +497,8 @@ export async function recordQuotePayment(
     profit: Number((Number(quote.profitTotal || 0) * ratio).toFixed(2)),
   };
 
-  // 1. Create income transaction in transactions
   const txId = createId();
-  await db.insert(transactions).values({
+  const txStatement = db.insert(transactions).values({
     id: txId,
     householdId,
     accountId: payload.accountId,
@@ -516,22 +516,7 @@ export async function recordQuotePayment(
     createdBy: userId,
   });
 
-  // 2. Adjust account balance
-  const account = await db.query.accounts.findFirst({
-    where: and(eq(accounts.id, payload.accountId), eq(accounts.householdId, householdId)),
-  });
-
-  if (account) {
-    const currentBal = Number(account.balance || 0);
-    const newBal = (currentBal + payAmount).toFixed(2);
-    await db
-      .update(accounts)
-      .set({ balance: newBal, updatedAt: new Date() })
-      .where(eq(accounts.id, account.id));
-  }
-
-  // 3. Update quote record
-  await db
+  const quoteUpdateStatement = db
     .update(businessQuotes)
     .set({
       paidAmount: String(newPaidAmount.toFixed(2)),
@@ -542,6 +527,32 @@ export async function recordQuotePayment(
       updatedAt: new Date(),
     })
     .where(eq(businessQuotes.id, quote.id));
+
+  const balanceAdjustment = buildBalanceAdjustment(householdId, payload.accountId, payAmount);
+  const auditStatement = buildAuditEntry({
+    householdId,
+    memberId: currentMember.id,
+    action: "create",
+    entityType: "quote_payment",
+    entityId: txId,
+    newValues: {
+      quoteId: quote.id,
+      amount: payAmount,
+      accountId: payload.accountId,
+      newRemainingAmount,
+      newStatus,
+    },
+  });
+
+  const batchOperations: any[] = [txStatement, quoteUpdateStatement];
+  if (balanceAdjustment) {
+    batchOperations.push(balanceAdjustment);
+  }
+  if (auditStatement) {
+    batchOperations.push(auditStatement);
+  }
+
+  await db.batch(batchOperations as [any, ...any[]]);
 
   revalidatePath("/businesses");
   revalidatePath("/transactions");

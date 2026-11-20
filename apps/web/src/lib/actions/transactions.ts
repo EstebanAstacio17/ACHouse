@@ -16,6 +16,7 @@ import { transactionSchema } from "@achouse/types";
 import { getActiveHouseholdId } from "@/lib/household";
 import { createId } from "@paralleldrive/cuid2";
 import { getTenantContext, requireWriter } from "@/lib/tenant";
+import { buildBalanceAdjustment, calculateBalanceEffects, buildAuditEntry } from "@/lib/ledger";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -211,9 +212,9 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       }
     }
 
-    // 4. Insert transaction directly (neon-http driver does not support interactive transactions)
+    // 4. Insert transaction and apply balance changes atomically in a single batch
     const newTxId = createId();
-    const [insertedTx] = await db
+    const insertTxStmt = db
       .insert(transactions)
       .values({
         id: newTxId,
@@ -239,37 +240,34 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
       })
       .returning();
 
-    // 5. Update account balance safely ONLY if transaction is not pending
+    const batchStatements: any[] = [insertTxStmt];
+
+    // 5. Balance adjustment calculated atomically at the Postgres level
     if (parsed.status !== "pending") {
-      const current = parseFloat(account.balance || "0");
-      const amount = parseFloat(parsed.amount.toString());
-      let newBalance = current;
-
-      if (parsed.type === "income") {
-        newBalance = current + amount;
-      } else if (parsed.type === "expense") {
-        newBalance = current - amount;
-      } else if (parsed.type === "transfer") {
-        newBalance = current - amount;
-        if (parsed.toAccountId) {
-          const toAccount = await db.query.accounts.findFirst({
-            where: and(eq(accounts.id, parsed.toAccountId), eq(accounts.householdId, householdId)),
-          });
-          if (toAccount) {
-            const toCurrent = parseFloat(toAccount.balance || "0");
-            await db
-              .update(accounts)
-              .set({ balance: (toCurrent + amount).toFixed(2), updatedAt: new Date() })
-              .where(eq(accounts.id, toAccount.id));
-          }
-        }
+      const effects = calculateBalanceEffects({
+        type: parsed.type,
+        amount: parsed.amount,
+        accountId: account.id,
+        toAccountId: parsed.toAccountId,
+      });
+      for (const eff of effects) {
+        batchStatements.push(buildBalanceAdjustment(householdId, eff.accountId, eff.delta));
       }
-
-      await db
-        .update(accounts)
-        .set({ balance: newBalance.toFixed(2), updatedAt: new Date() })
-        .where(eq(accounts.id, account.id));
     }
+
+    batchStatements.push(
+      buildAuditEntry({
+        householdId,
+        memberId,
+        action: "create",
+        entityType: "transaction",
+        entityId: newTxId,
+        newValues: { description: parsed.description, amount: parsed.amount, type: parsed.type },
+      })
+    );
+
+    const [insertedRows] = await db.batch(batchStatements as any);
+    const insertedTx = (insertedRows as any)[0];
 
     try {
       revalidatePath("/dashboard");
@@ -338,38 +336,9 @@ export async function confirmPendingTransaction(
       return { success: false, error: "Cuenta de depósito no encontrada" };
     }
 
-    const amount = parseFloat(existing.amount || "0");
-    const currentBal = parseFloat(targetAccount.balance || "0");
-    let newBal = currentBal;
-
-    if (existing.type === "income") {
-      newBal = currentBal + amount;
-    } else if (existing.type === "expense") {
-      newBal = currentBal - amount;
-    } else if (existing.type === "transfer") {
-      newBal = currentBal - amount;
-      if (existing.toAccountId) {
-        const toAcc = await db.query.accounts.findFirst({
-          where: and(eq(accounts.id, existing.toAccountId), eq(accounts.householdId, householdId)),
-        });
-        if (toAcc) {
-          const toCur = parseFloat(toAcc.balance || "0");
-          await db
-            .update(accounts)
-            .set({ balance: (toCur + amount).toFixed(2), updatedAt: new Date() })
-            .where(eq(accounts.id, toAcc.id));
-        }
-      }
-    }
-
-    await db
-      .update(accounts)
-      .set({ balance: newBal.toFixed(2), updatedAt: new Date() })
-      .where(eq(accounts.id, targetAccount.id));
-
     const confirmedDate = options?.depositDate ? new Date(options.depositDate) : new Date();
 
-    const [updated] = await db
+    const updateTxStmt = db
       .update(transactions)
       .set({
         status: "cleared",
@@ -377,8 +346,33 @@ export async function confirmPendingTransaction(
         date: confirmedDate,
         updatedAt: new Date(),
       })
-      .where(eq(transactions.id, id))
+      .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)))
       .returning();
+
+    const effects = calculateBalanceEffects({
+      type: existing.type,
+      amount: existing.amount,
+      accountId: targetAccountId,
+      toAccountId: existing.toAccountId,
+    });
+
+    const batchStatements: any[] = [updateTxStmt];
+    for (const eff of effects) {
+      batchStatements.push(buildBalanceAdjustment(householdId, eff.accountId, eff.delta));
+    }
+    batchStatements.push(
+      buildAuditEntry({
+        householdId,
+        memberId: authCtx.member?.id,
+        action: "update",
+        entityType: "transaction",
+        entityId: id,
+        newValues: { status: "cleared", accountId: targetAccountId },
+      })
+    );
+
+    const [updatedRows] = await db.batch(batchStatements as any);
+    const updated = (updatedRows as any)[0];
 
     try {
       revalidatePath("/dashboard");
@@ -447,77 +441,65 @@ export async function updateTransaction(id: string, data: Partial<z.infer<typeof
       }
     }
 
-    // Handle balance changes if status or amount changed
-    const oldStatus = existing.status;
-    const newStatus = data.status || oldStatus;
-    const oldAmount = parseFloat(existing.amount || "0");
-    const newAmount = data.amount !== undefined ? parseFloat(data.amount.toString()) : oldAmount;
-    const targetAccountId = data.accountId || existing.accountId;
+    const batchStatements: any[] = [];
 
-    if (oldStatus === "pending" && (newStatus === "cleared" || newStatus === "reconciled")) {
-      // Transition from pending -> cleared: add to balance
-      const account = await db.query.accounts.findFirst({
-        where: and(eq(accounts.id, targetAccountId), eq(accounts.householdId, householdId)),
+    // Revert old effects if the transaction was cleared/reconciled
+    const wasActive = existing.status === "cleared" || existing.status === "reconciled";
+    if (wasActive) {
+      const oldEffects = calculateBalanceEffects({
+        type: existing.type,
+        amount: existing.amount,
+        accountId: existing.accountId,
+        toAccountId: existing.toAccountId,
       });
-      if (account) {
-        const cur = parseFloat(account.balance || "0");
-        const diff = existing.type === "income" ? newAmount : existing.type === "expense" ? -newAmount : 0;
-        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
-      }
-    } else if ((oldStatus === "cleared" || oldStatus === "reconciled") && newStatus === "pending") {
-      // Transition from cleared -> pending: reverse from balance
-      const account = await db.query.accounts.findFirst({
-        where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
-      });
-      if (account) {
-        const cur = parseFloat(account.balance || "0");
-        const diff = existing.type === "income" ? -oldAmount : existing.type === "expense" ? oldAmount : 0;
-        await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
-      }
-    } else if ((oldStatus === "cleared" || oldStatus === "reconciled") && (newStatus === "cleared" || newStatus === "reconciled") && (oldAmount !== newAmount || data.accountId)) {
-      // Amount or account changed while active
-      if (data.accountId && data.accountId !== existing.accountId) {
-        // Reverse from old account
-        const oldAcc = await db.query.accounts.findFirst({
-          where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
-        });
-        if (oldAcc) {
-          const cur = parseFloat(oldAcc.balance || "0");
-          const diff = existing.type === "income" ? -oldAmount : existing.type === "expense" ? oldAmount : 0;
-          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, oldAcc.id));
-        }
-        // Apply to new account
-        const newAcc = await db.query.accounts.findFirst({
-          where: and(eq(accounts.id, data.accountId), eq(accounts.householdId, householdId)),
-        });
-        if (newAcc) {
-          const cur = parseFloat(newAcc.balance || "0");
-          const diff = existing.type === "income" ? newAmount : existing.type === "expense" ? -newAmount : 0;
-          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, newAcc.id));
-        }
-      } else {
-        const account = await db.query.accounts.findFirst({
-          where: and(eq(accounts.id, existing.accountId), eq(accounts.householdId, householdId)),
-        });
-        if (account) {
-          const cur = parseFloat(account.balance || "0");
-          const diff = existing.type === "income" ? (newAmount - oldAmount) : existing.type === "expense" ? -(newAmount - oldAmount) : 0;
-          await db.update(accounts).set({ balance: (cur + diff).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
-        }
+      for (const eff of oldEffects) {
+        const revertDelta = eff.delta.startsWith("-") ? eff.delta.substring(1) : `-${eff.delta}`;
+        batchStatements.push(buildBalanceAdjustment(householdId, eff.accountId, revertDelta));
       }
     }
 
-    await db
-      .update(transactions)
-      .set({
-        ...data,
-        categoryId: categoryId !== undefined ? categoryId : undefined,
-        businessId: businessId !== undefined ? businessId : undefined,
-        amount: data.amount?.toString(),
-        date: data.date ? new Date(data.date) : undefined,
-        updatedAt: new Date(),
+    // Apply new effects if the transaction is or remains cleared/reconciled
+    const nextStatus = data.status || existing.status;
+    const willBeActive = nextStatus === "cleared" || nextStatus === "reconciled";
+    if (willBeActive) {
+      const newEffects = calculateBalanceEffects({
+        type: (data.type || existing.type) as any,
+        amount: data.amount !== undefined ? data.amount : existing.amount,
+        accountId: data.accountId || existing.accountId,
+        toAccountId: data.toAccountId !== undefined ? data.toAccountId : existing.toAccountId,
+      });
+      for (const eff of newEffects) {
+        batchStatements.push(buildBalanceAdjustment(householdId, eff.accountId, eff.delta));
+      }
+    }
+
+    batchStatements.push(
+      db
+        .update(transactions)
+        .set({
+          ...data,
+          categoryId: categoryId !== undefined ? categoryId : undefined,
+          businessId: businessId !== undefined ? businessId : undefined,
+          amount: data.amount?.toString(),
+          date: data.date ? new Date(data.date) : undefined,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)))
+    );
+
+    batchStatements.push(
+      buildAuditEntry({
+        householdId,
+        memberId: authCtx.member?.id,
+        action: "update",
+        entityType: "transaction",
+        entityId: id,
+        oldValues: { amount: existing.amount, status: existing.status, accountId: existing.accountId },
+        newValues: { amount: data.amount, status: data.status, accountId: data.accountId },
       })
-      .where(eq(transactions.id, id));
+    );
+
+    await db.batch(batchStatements as any);
 
     try {
       revalidatePath("/dashboard");
@@ -545,42 +527,39 @@ export async function deleteTransaction(id: string) {
       where: and(eq(transactions.id, id), eq(transactions.householdId, householdId)),
     });
 
+    const batchStatements: any[] = [
+      db
+        .update(transactions)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId))),
+    ];
+
     if (existing && (existing.status === "cleared" || existing.status === "reconciled")) {
-      const numAmount = parseFloat(existing.amount || "0");
-      if (existing.type === "income") {
-        const account = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
-        if (account) {
-          const cur = parseFloat(account.balance || "0");
-          await db.update(accounts).set({ balance: (cur - numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
-        }
-      } else if (existing.type === "expense") {
-        const account = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
-        if (account) {
-          const cur = parseFloat(account.balance || "0");
-          await db.update(accounts).set({ balance: (cur + numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
-        }
-      } else if (existing.type === "transfer") {
-        // Revert origin: restore amount
-        const fromAccount = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
-        if (fromAccount) {
-          const cur = parseFloat(fromAccount.balance || "0");
-          await db.update(accounts).set({ balance: (cur + numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, fromAccount.id));
-        }
-        // Revert destination: remove transferred amount
-        if (existing.toAccountId) {
-          const toAccount = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.toAccountId) });
-          if (toAccount) {
-            const toCur = parseFloat(toAccount.balance || "0");
-            await db.update(accounts).set({ balance: (toCur - numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, toAccount.id));
-          }
-        }
+      const effects = calculateBalanceEffects({
+        type: existing.type,
+        amount: existing.amount,
+        accountId: existing.accountId,
+        toAccountId: existing.toAccountId,
+      });
+      // Invert delta to revert balance
+      for (const eff of effects) {
+        const revertDelta = eff.delta.startsWith("-") ? eff.delta.substring(1) : `-${eff.delta}`;
+        batchStatements.push(buildBalanceAdjustment(householdId, eff.accountId, revertDelta));
       }
     }
 
-    await db
-      .update(transactions)
-      .set({ deletedAt: new Date() })
-      .where(and(eq(transactions.id, id), eq(transactions.householdId, householdId)));
+    batchStatements.push(
+      buildAuditEntry({
+        householdId,
+        memberId: authCtx.member?.id,
+        action: "delete",
+        entityType: "transaction",
+        entityId: id,
+        oldValues: { description: existing?.description, amount: existing?.amount },
+      })
+    );
+
+    await db.batch(batchStatements as any);
 
     try {
       revalidatePath("/dashboard");
