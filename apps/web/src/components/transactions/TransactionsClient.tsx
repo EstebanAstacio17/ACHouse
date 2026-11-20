@@ -881,6 +881,21 @@ function TransactionModal({
   );
 }
 
+const isRoleName = (name?: string | null) => {
+  if (!name || !name.trim()) return true;
+  const lower = name.trim().toLowerCase();
+  return (
+    lower === "administrador" ||
+    lower === "admin" ||
+    lower === "colaborador" ||
+    lower === "contributor" ||
+    lower === "lector" ||
+    lower === "viewer" ||
+    lower === "miembro" ||
+    lower === "nuevo miembro"
+  );
+};
+
 interface TransactionsClientProps {
   initialTransactions?: any[];
   initialAccounts?: any[];
@@ -900,6 +915,27 @@ export function TransactionsClient({
 }: TransactionsClientProps = {}) {
   const toast = useToast();
   const { user } = useUser();
+
+  const getResolvedUserName = () => {
+    if (!user) return null;
+    return (
+      user.fullName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+      user.username ||
+      user.primaryEmailAddress?.emailAddress?.split("@")[0] ||
+      null
+    );
+  };
+
+  const formatMemberName = (displayName?: string | null) => {
+    if (!displayName) return "Hogar";
+    if (isRoleName(displayName)) {
+      const resolved = getResolvedUserName();
+      if (resolved) return resolved;
+    }
+    return displayName;
+  };
+
   const [householdCurrency, setHouseholdCurrency] = useState(initialCurrency || "DOP");
   const [transactionsList, setTransactionsList] = useState<TransactionItem[]>(() => {
     if (initialTransactions && initialTransactions.length > 0) {
@@ -1029,41 +1065,6 @@ export function TransactionsClient({
       }
     }
   }, []);
-
-  const isRoleName = (name?: string | null) => {
-    if (!name || !name.trim()) return true;
-    const lower = name.trim().toLowerCase();
-    return (
-      lower === "administrador" ||
-      lower === "admin" ||
-      lower === "colaborador" ||
-      lower === "contributor" ||
-      lower === "lector" ||
-      lower === "viewer" ||
-      lower === "miembro" ||
-      lower === "nuevo miembro"
-    );
-  };
-
-  const getResolvedUserName = () => {
-    if (!user) return null;
-    return (
-      user.fullName ||
-      [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
-      user.username ||
-      user.primaryEmailAddress?.emailAddress?.split("@")[0] ||
-      null
-    );
-  };
-
-  const formatMemberName = (displayName?: string | null) => {
-    if (!displayName) return "Hogar";
-    if (isRoleName(displayName)) {
-      const resolved = getResolvedUserName();
-      if (resolved) return resolved;
-    }
-    return displayName;
-  };
 
   useEffect(() => {
     let active = true;
