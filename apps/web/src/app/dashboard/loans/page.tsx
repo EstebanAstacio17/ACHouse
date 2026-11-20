@@ -6,17 +6,21 @@ import { getAccounts, getMembers } from "@/lib/actions/entities";
 export const metadata: Metadata = { title: "Préstamos" };
 
 export default async function LoansPage() {
-  const [loans, accounts, members] = await Promise.all([
-    getLoans().catch(() => []),
-    getAccounts().catch(() => []),
-    getMembers().catch(() => []),
-  ]);
+  try {
+    const [loans, accounts, members] = await Promise.all([
+      getLoans(),
+      getAccounts(),
+      getMembers(),
+    ]);
 
-  return (
-    <LoansClient
-      initialLoans={loans || []}
-      initialAccounts={accounts || []}
-      initialMembers={members || []}
-    />
-  );
+    return (
+      <LoansClient
+        initialLoans={loans || []}
+        initialAccounts={accounts || []}
+        initialMembers={members || []}
+      />
+    );
+  } catch {
+    return <LoansClient />;
+  }
 }

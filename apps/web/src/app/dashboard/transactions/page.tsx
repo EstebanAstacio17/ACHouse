@@ -8,23 +8,27 @@ import { getActiveHousehold } from "@/lib/household";
 export const metadata: Metadata = { title: "Transacciones" };
 
 export default async function TransactionsPage() {
-  const [txs, accs, cats, mems, bizs, household] = await Promise.all([
-    getTransactions({ perPage: 0 }).catch(() => []),
-    getAccounts().catch(() => []),
-    getCategories().catch(() => []),
-    getMembers().catch(() => []),
-    getBusinessList().catch(() => []),
-    getActiveHousehold().catch(() => null),
-  ]);
+  try {
+    const [txs, accs, cats, mems, bizs, household] = await Promise.all([
+      getTransactions({ perPage: 0 }),
+      getAccounts(),
+      getCategories(),
+      getMembers(),
+      getBusinessList(),
+      getActiveHousehold(),
+    ]);
 
-  return (
-    <TransactionsClient
-      initialTransactions={txs || []}
-      initialAccounts={accs || []}
-      initialCategories={cats || []}
-      initialMembers={mems || []}
-      initialBusinesses={bizs || []}
-      initialCurrency={household?.defaultCurrency || "DOP"}
-    />
-  );
+    return (
+      <TransactionsClient
+        initialTransactions={txs || []}
+        initialAccounts={accs || []}
+        initialCategories={cats || []}
+        initialMembers={mems || []}
+        initialBusinesses={bizs || []}
+        initialCurrency={household?.defaultCurrency || "DOP"}
+      />
+    );
+  } catch {
+    return <TransactionsClient />;
+  }
 }
