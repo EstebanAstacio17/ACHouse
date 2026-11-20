@@ -10,9 +10,6 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, Tooltip, Legend, CartesianGrid
 } from "recharts";
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
@@ -141,52 +138,65 @@ export function ReportsClient() {
   }, [transactions, accounts]);
 
   // Export to Excel
-  const exportExcel = () => {
-    const data = categoryBreakdown.map(c => ({
-      Categoría: c.category,
-      Monto: c.amount,
-      Porcentaje: `${c.percentage}%`,
-    }));
+  const exportExcel = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const data = categoryBreakdown.map(c => ({
+        Categoría: c.category,
+        Monto: c.amount,
+        Porcentaje: `${c.percentage}%`,
+      }));
 
-    const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ Info: "Sin gastos registrados" }]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Gastos por Categoría");
-    XLSX.writeFile(wb, `Reporte_Financiero_ACHouse_${format(new Date(), "yyyyMMdd")}.xlsx`);
-    toast.success("Reporte en Excel descargado exitosamente");
+      const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ Info: "Sin gastos registrados" }]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Gastos por Categoría");
+      XLSX.writeFile(wb, `Reporte_Financiero_ACHouse_${format(new Date(), "yyyyMMdd")}.xlsx`);
+      toast.success("Reporte en Excel descargado exitosamente");
+    } catch (err: any) {
+      toast.error("Error al exportar a Excel: " + (err?.message || ""));
+    }
   };
 
   // Export to PDF
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("ACHouse — Reporte Financiero Consolidado", 14, 20);
+  const exportPDF = async () => {
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text("ACHouse — Reporte Financiero Consolidado", 14, 20);
 
-    doc.setFontSize(10);
-    doc.text(`Fecha de emisión: ${format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: es })}`, 14, 28);
-    doc.text(`Hogar: ACHouse · Moneda: ${reportCurrency}`, 14, 34);
+      doc.setFontSize(10);
+      doc.text(`Fecha de emisión: ${format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: es })}`, 14, 28);
+      doc.text(`Hogar: ACHouse · Moneda: ${reportCurrency}`, 14, 34);
 
-    // Summary block
-    doc.setFontSize(12);
-    doc.text("Resumen General", 14, 46);
-    doc.setFontSize(10);
-    doc.text(`Total Ingresos: ${fmt(totalIncome)}`, 14, 54);
-    doc.text(`Total Egresos: ${fmt(totalExpense)}`, 14, 60);
-    doc.text(`Flujo Neto: ${netFlow >= 0 ? "+" : ""}${fmt(netFlow)}`, 14, 66);
-    doc.text(`Tasa de Ahorro: ${savingsRate.toFixed(1)}%`, 14, 72);
+      // Summary block
+      doc.setFontSize(12);
+      doc.text("Resumen General", 14, 46);
+      doc.setFontSize(10);
+      doc.text(`Total Ingresos: ${fmt(totalIncome)}`, 14, 54);
+      doc.text(`Total Egresos: ${fmt(totalExpense)}`, 14, 60);
+      doc.text(`Flujo Neto: ${netFlow >= 0 ? "+" : ""}${fmt(netFlow)}`, 14, 66);
+      doc.text(`Tasa de Ahorro: ${savingsRate.toFixed(1)}%`, 14, 72);
 
-    // Table
-    autoTable(doc, {
-      startY: 80,
-      head: [["Categoría", `Monto (${reportCurrency})`, "Distribución %"]],
-      body: categoryBreakdown.length > 0
-        ? categoryBreakdown.map(c => [c.category, fmt(c.amount), `${c.percentage}%`])
-        : [["Sin datos", "$0.00", "0%"]],
-      theme: "striped",
-      headStyles: { fillColor: [99, 102, 241] },
-    });
+      // Table
+      autoTable(doc, {
+        startY: 80,
+        head: [["Categoría", `Monto (${reportCurrency})`, "Distribución %"]],
+        body: categoryBreakdown.length > 0
+          ? categoryBreakdown.map(c => [c.category, fmt(c.amount), `${c.percentage}%`])
+          : [["Sin datos", "$0.00", "0%"]],
+        theme: "striped",
+        headStyles: { fillColor: [99, 102, 241] },
+      });
 
-    doc.save(`Reporte_ACHouse_${format(new Date(), "yyyyMMdd")}.pdf`);
-    toast.success("Reporte en PDF generado exitosamente");
+      doc.save(`Reporte_ACHouse_${format(new Date(), "yyyyMMdd")}.pdf`);
+      toast.success("Reporte en PDF generado exitosamente");
+    } catch (err: any) {
+      toast.error("Error al generar PDF: " + (err?.message || ""));
+    }
   };
 
   const handleSaveReconciliation = (e: React.FormEvent) => {

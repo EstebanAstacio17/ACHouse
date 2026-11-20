@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import * as XLSX from "xlsx";
 import { useToast } from "@/components/ui/ToastContext";
 import { useUser } from "@clerk/nextjs";
 import { formatMoney } from "@/lib/geo";
@@ -1293,27 +1292,32 @@ export function TransactionsClient() {
     }
   };
 
-  const exportToExcel = () => {
-    const dataToExport = filtered.map(t => ({
-      Fecha: format(t.date, "yyyy-MM-dd"),
-      Tipo: t.type === "income" ? "Ingreso" : t.type === "expense" ? "Egreso" : "Transferencia",
-      Descripción: t.description,
-      "Empresa / Negocio": t.business?.name || "Hogar / Personal",
-      Categoría: t.category?.name || "N/A",
-      Cuenta: t.account.name,
-      "Cuenta Destino": t.toAccount?.name || "N/A",
-      Integrante: formatMemberName(t.member?.displayName),
-      Monto: parseFloat(t.amount),
-      Moneda: t.currency,
-      Estado: t.status === "pending" ? "Pendiente por Cobrar" : t.status === "cleared" ? "Conciliado" : "Reconciliado",
-      Recurrente: t.isRecurring ? `Sí (${t.recurringFrequency})` : "No",
-    }));
+  const exportToExcel = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const dataToExport = filtered.map(t => ({
+        Fecha: format(t.date, "yyyy-MM-dd"),
+        Tipo: t.type === "income" ? "Ingreso" : t.type === "expense" ? "Egreso" : "Transferencia",
+        Descripción: t.description,
+        "Empresa / Negocio": t.business?.name || "Hogar / Personal",
+        Categoría: t.category?.name || "N/A",
+        Cuenta: t.account.name,
+        "Cuenta Destino": t.toAccount?.name || "N/A",
+        Integrante: formatMemberName(t.member?.displayName),
+        Monto: parseFloat(t.amount),
+        Moneda: t.currency,
+        Estado: t.status === "pending" ? "Pendiente por Cobrar" : t.status === "cleared" ? "Conciliado" : "Reconciliado",
+        Recurrente: t.isRecurring ? `Sí (${t.recurringFrequency})` : "No",
+      }));
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Transacciones");
-    XLSX.writeFile(workbook, `Transacciones_ACHouse_${format(new Date(), "yyyyMMdd_HHmm")}.xlsx`);
-    toast.success("Archivo Excel exportado con éxito");
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Transacciones");
+      XLSX.writeFile(workbook, `Transacciones_ACHouse_${format(new Date(), "yyyyMMdd_HHmm")}.xlsx`);
+      toast.success("Archivo Excel exportado con éxito");
+    } catch (err: any) {
+      toast.error("Error al exportar a Excel: " + (err?.message || ""));
+    }
   };
 
   return (
