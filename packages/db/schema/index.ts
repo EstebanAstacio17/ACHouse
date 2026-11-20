@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, integer, decimal, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, integer, decimal, jsonb, pgEnum, index } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -27,16 +27,22 @@ export const households = pgTable("households", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const householdMembers = pgTable("household_members", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  clerkUserId: text("clerk_user_id").notNull(),
-  role: memberRoleEnum("role").notNull().default("contributor"),
-  displayName: text("display_name").notNull(),
-  avatarUrl: text("avatar_url"),
-  isActive: boolean("is_active").notNull().default(true),
-  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const householdMembers = pgTable(
+  "household_members",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    role: memberRoleEnum("role").notNull().default("contributor"),
+    displayName: text("display_name").notNull(),
+    avatarUrl: text("avatar_url"),
+    isActive: boolean("is_active").notNull().default(true),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_household_members_clerk_tenant").on(table.clerkUserId, table.householdId),
+  ]
+);
 
 export const householdInvitations = pgTable("household_invitations", {
   id: text("id").primaryKey().$defaultFn(() => createId()),
@@ -63,89 +69,118 @@ export const memberIncomeSources = pgTable("member_income_sources", {
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
-export const accounts = pgTable("accounts", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  type: accountTypeEnum("type").notNull(),
-  balance: decimal("balance", { precision: 15, scale: 2 }).notNull().default("0"),
-  currency: text("currency").notNull().default("DOP"),
-  isActive: boolean("is_active").notNull().default(true),
-  // Mixed Ownership: personal (ownerMemberId), business-dedicated (businessId), or shared/household (null)
-  ownerMemberId: text("owner_member_id").references(() => householdMembers.id),
-  businessId: text("business_id").references(() => businesses.id),
-  // Credit card fields
-  creditLimit: decimal("credit_limit", { precision: 15, scale: 2 }),
-  availableCredit: decimal("available_credit", { precision: 15, scale: 2 }),
-  statementDay: integer("statement_day"),
-  paymentDueDay: integer("payment_due_day"),
-  minimumPayment: decimal("minimum_payment", { precision: 15, scale: 2 }),
-  currentStatementBalance: decimal("current_statement_balance", { precision: 15, scale: 2 }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: accountTypeEnum("type").notNull(),
+    balance: decimal("balance", { precision: 15, scale: 2 }).notNull().default("0"),
+    currency: text("currency").notNull().default("DOP"),
+    isActive: boolean("is_active").notNull().default(true),
+    // Mixed Ownership: personal (ownerMemberId), business-dedicated (businessId), or shared/household (null)
+    ownerMemberId: text("owner_member_id").references(() => householdMembers.id),
+    businessId: text("business_id").references(() => businesses.id),
+    // Credit card fields
+    creditLimit: decimal("credit_limit", { precision: 15, scale: 2 }),
+    availableCredit: decimal("available_credit", { precision: 15, scale: 2 }),
+    statementDay: integer("statement_day"),
+    paymentDueDay: integer("payment_due_day"),
+    minimumPayment: decimal("minimum_payment", { precision: 15, scale: 2 }),
+    currentStatementBalance: decimal("current_statement_balance", { precision: 15, scale: 2 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_accounts_household_id").on(table.householdId),
+  ]
+);
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
-export const categories = pgTable("categories", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  type: categoryTypeEnum("type").notNull(),
-  color: text("color").notNull().default("#6366f1"),
-  icon: text("icon").notNull().default("tag"),
-  parentId: text("parent_id"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const categories = pgTable(
+  "categories",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: categoryTypeEnum("type").notNull(),
+    color: text("color").notNull().default("#6366f1"),
+    icon: text("icon").notNull().default("tag"),
+    parentId: text("parent_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_categories_household_id").on(table.householdId),
+  ]
+);
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 
-export const transactions = pgTable("transactions", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  accountId: text("account_id").notNull().references(() => accounts.id),
-  memberId: text("member_id").references(() => householdMembers.id),
-  businessId: text("business_id"),
-  projectId: text("project_id"),
-  categoryId: text("category_id").references(() => categories.id),
-  type: transactionTypeEnum("type").notNull(),
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  currency: text("currency").notNull().default("DOP"),
-  exchangeRate: decimal("exchange_rate", { precision: 15, scale: 6 }),
-  description: text("description").notNull(),
-  date: timestamp("date", { withTimezone: true }).notNull(),
-  referenceNo: text("reference_no"),
-  attachmentUrl: text("attachment_url"),
-  isRecurring: boolean("is_recurring").notNull().default(false),
-  recurringConfig: jsonb("recurring_config"),
-  status: transactionStatusEnum("status").notNull().default("cleared"),
-  toAccountId: text("to_account_id").references(() => accounts.id), // for transfers
-  // Multi-unit & Concept Tracking
-  conceptType: text("concept_type"), // 'material' | 'labor' | 'energy' | 'wear_equipment' | 'profit_draw' | 'operational_expense' | 'income_sale'
-  costBreakdown: jsonb("cost_breakdown"), // pocket allocations { material, energy, wearRisk, labor, profit }
-  quoteId: text("quote_id"), // linked businessQuote
-  createdBy: text("created_by").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const transactions = pgTable(
+  "transactions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => accounts.id),
+    memberId: text("member_id").references(() => householdMembers.id),
+    businessId: text("business_id"),
+    projectId: text("project_id"),
+    categoryId: text("category_id").references(() => categories.id),
+    type: transactionTypeEnum("type").notNull(),
+    amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("DOP"),
+    exchangeRate: decimal("exchange_rate", { precision: 15, scale: 6 }),
+    description: text("description").notNull(),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    referenceNo: text("reference_no"),
+    attachmentUrl: text("attachment_url"),
+    isRecurring: boolean("is_recurring").notNull().default(false),
+    recurringConfig: jsonb("recurring_config"),
+    status: transactionStatusEnum("status").notNull().default("cleared"),
+    toAccountId: text("to_account_id").references(() => accounts.id), // for transfers
+    // Multi-unit & Concept Tracking
+    conceptType: text("concept_type"), // 'material' | 'labor' | 'energy' | 'wear_equipment' | 'profit_draw' | 'operational_expense' | 'income_sale'
+    costBreakdown: jsonb("cost_breakdown"), // pocket allocations { material, energy, wearRisk, labor, profit }
+    quoteId: text("quote_id"), // linked businessQuote
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_transactions_tenant_date").on(table.householdId, table.date),
+    index("idx_transactions_account_id").on(table.accountId),
+    index("idx_transactions_to_account_id").on(table.toAccountId),
+    index("idx_transactions_category_id").on(table.categoryId),
+    index("idx_transactions_business_id").on(table.businessId),
+    index("idx_transactions_member_id").on(table.memberId),
+  ]
+);
 
 // ─── Businesses ───────────────────────────────────────────────────────────────
 
-export const businesses = pgTable("businesses", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  description: text("description"),
-  type: text("type"),
-  currency: text("currency").notNull().default("DOP"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const businesses = pgTable(
+  "businesses",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type"),
+    currency: text("currency").notNull().default("DOP"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_businesses_household_id").on(table.householdId),
+  ]
+);
 
 export const businessTransactions = pgTable("business_transactions", {
   id: text("id").primaryKey().$defaultFn(() => createId()),
@@ -176,37 +211,43 @@ export const businessCatalogItems = pgTable("business_catalog_items", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const businessQuotes = pgTable("business_quotes", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  businessId: text("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
-  memberId: text("member_id").references(() => householdMembers.id),
-  accountId: text("account_id").references(() => accounts.id),
-  clientName: text("client_name").notNull(),
-  title: text("title").notNull(),
-  description: text("description"),
-  templateType: text("template_type").notNull().default("3d_print"), // '3d_print' | 'copy_service' | 'custom' | 'hourly'
-  deliveryTime: text("delivery_time"),
-  paymentMethod: text("payment_method"),
-  currency: text("currency").notNull().default("DOP"),
-  lineItems: jsonb("line_items"),
-  materialTotal: decimal("material_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  energyTotal: decimal("energy_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  wearRiskTotal: decimal("wear_risk_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  laborTotal: decimal("labor_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  overheadTotal: decimal("overhead_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  profitTotal: decimal("profit_total", { precision: 15, scale: 2 }).notNull().default("0"),
-  totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).notNull().default("0"),
-  paymentStatus: text("payment_status").notNull().default("quote"), // 'quote' | 'pending' | 'partial' | 'paid'
-  paidPercentage: decimal("paid_percentage", { precision: 5, scale: 2 }).notNull().default("0"),
-  paidAmount: decimal("paid_amount", { precision: 15, scale: 2 }).notNull().default("0"),
-  remainingAmount: decimal("remaining_amount", { precision: 15, scale: 2 }).notNull().default("0"),
-  date: timestamp("date", { withTimezone: true }).notNull().defaultNow(),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const businessQuotes = pgTable(
+  "business_quotes",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    businessId: text("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => householdMembers.id),
+    accountId: text("account_id").references(() => accounts.id),
+    clientName: text("client_name").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    templateType: text("template_type").notNull().default("3d_print"), // '3d_print' | 'copy_service' | 'custom' | 'hourly'
+    deliveryTime: text("delivery_time"),
+    paymentMethod: text("payment_method"),
+    currency: text("currency").notNull().default("DOP"),
+    lineItems: jsonb("line_items"),
+    materialTotal: decimal("material_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    energyTotal: decimal("energy_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    wearRiskTotal: decimal("wear_risk_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    laborTotal: decimal("labor_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    overheadTotal: decimal("overhead_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    profitTotal: decimal("profit_total", { precision: 15, scale: 2 }).notNull().default("0"),
+    totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+    paymentStatus: text("payment_status").notNull().default("quote"), // 'quote' | 'pending' | 'partial' | 'paid'
+    paidPercentage: decimal("paid_percentage", { precision: 5, scale: 2 }).notNull().default("0"),
+    paidAmount: decimal("paid_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+    remainingAmount: decimal("remaining_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+    date: timestamp("date", { withTimezone: true }).notNull().defaultNow(),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_business_quotes_household_id").on(table.householdId),
+  ]
+);
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
@@ -241,40 +282,52 @@ export const projectTransactions = pgTable("project_transactions", {
 
 // ─── Loans ────────────────────────────────────────────────────────────────────
 
-export const loans = pgTable("loans", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  lenderType: lenderTypeEnum("lender_type").notNull(),
-  lenderName: text("lender_name"),
-  lenderMemberId: text("lender_member_id").references(() => householdMembers.id),
-  borrowerMemberId: text("borrower_member_id").references(() => householdMembers.id),
-  principalAmount: decimal("principal_amount", { precision: 15, scale: 2 }).notNull(),
-  remainingBalance: decimal("remaining_balance", { precision: 15, scale: 2 }).notNull(),
-  interestRate: decimal("interest_rate", { precision: 7, scale: 4 }).notNull().default("0"),
-  interestType: interestTypeEnum("interest_type").notNull().default("fixed"),
-  monthlyPayment: decimal("monthly_payment", { precision: 15, scale: 2 }),
-  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
-  endDate: timestamp("end_date", { withTimezone: true }),
-  accountId: text("account_id").references(() => accounts.id),
-  currency: text("currency").notNull().default("DOP"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const loans = pgTable(
+  "loans",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    lenderType: lenderTypeEnum("lender_type").notNull(),
+    lenderName: text("lender_name"),
+    lenderMemberId: text("lender_member_id").references(() => householdMembers.id),
+    borrowerMemberId: text("borrower_member_id").references(() => householdMembers.id),
+    principalAmount: decimal("principal_amount", { precision: 15, scale: 2 }).notNull(),
+    remainingBalance: decimal("remaining_balance", { precision: 15, scale: 2 }).notNull(),
+    interestRate: decimal("interest_rate", { precision: 7, scale: 4 }).notNull().default("0"),
+    interestType: interestTypeEnum("interest_type").notNull().default("fixed"),
+    monthlyPayment: decimal("monthly_payment", { precision: 15, scale: 2 }),
+    startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+    endDate: timestamp("end_date", { withTimezone: true }),
+    accountId: text("account_id").references(() => accounts.id),
+    currency: text("currency").notNull().default("DOP"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_loans_household_id").on(table.householdId),
+  ]
+);
 
-export const loanPayments = pgTable("loan_payments", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  loanId: text("loan_id").notNull().references(() => loans.id, { onDelete: "cascade" }),
-  transactionId: text("transaction_id").references(() => transactions.id),
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  date: timestamp("date", { withTimezone: true }).notNull(),
-  principalPaid: decimal("principal_paid", { precision: 15, scale: 2 }).notNull().default("0"),
-  interestPaid: decimal("interest_paid", { precision: 15, scale: 2 }).notNull().default("0"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const loanPayments = pgTable(
+  "loan_payments",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    loanId: text("loan_id").notNull().references(() => loans.id, { onDelete: "cascade" }),
+    transactionId: text("transaction_id").references(() => transactions.id),
+    amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    principalPaid: decimal("principal_paid", { precision: 15, scale: 2 }).notNull().default("0"),
+    interestPaid: decimal("interest_paid", { precision: 15, scale: 2 }).notNull().default("0"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_loan_payments_loan_id").on(table.loanId),
+  ]
+);
 
 // ─── Reconciliation ───────────────────────────────────────────────────────────
 
@@ -293,17 +346,23 @@ export const reconciliationEntries = pgTable("reconciliation_entries", {
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────
 
-export const auditLog = pgTable("audit_log", {
-  id: text("id").primaryKey().$defaultFn(() => createId()),
-  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
-  memberId: text("member_id").references(() => householdMembers.id),
-  action: text("action").notNull(),
-  entityType: text("entity_type").notNull(),
-  entityId: text("entity_id").notNull(),
-  oldValues: jsonb("old_values"),
-  newValues: jsonb("new_values"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => householdMembers.id),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    oldValues: jsonb("old_values"),
+    newValues: jsonb("new_values"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_audit_log_tenant_date").on(table.householdId, table.createdAt),
+  ]
+);
 
 // ─── Relations ───────────────────────────────────────────────────────────────
 

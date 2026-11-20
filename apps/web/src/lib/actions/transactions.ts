@@ -9,7 +9,7 @@ import {
   householdMembers,
   businesses,
 } from "@achouse/db/schema";
-import { eq, and, desc, gte, lte, ilike, isNull } from "drizzle-orm";
+import { eq, and, desc, gte, lte, ilike, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { transactionSchema } from "@achouse/types";
@@ -593,9 +593,9 @@ export async function getDashboardKPIs() {
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  const [monthlyTxs, allPendingTxs, allAccounts] = await Promise.all([
+  const [monthlyTxs, pendingResult, balanceResult] = await Promise.all([
     db.query.transactions.findMany({
       where: and(
         eq(transactions.householdId, householdId),
@@ -604,28 +604,45 @@ export async function getDashboardKPIs() {
         lte(transactions.date, endOfMonth)
       ),
       with: { category: true },
+      orderBy: (t, { desc }) => [desc(t.date)],
     }),
-    db.query.transactions.findMany({
-      where: and(
-        eq(transactions.householdId, householdId),
-        eq(transactions.status, "pending"),
-        isNull(transactions.deletedAt)
+    db
+      .select({
+        count: sql<number>`count(*)::int`,
+        total: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.householdId, householdId),
+          eq(transactions.status, "pending"),
+          eq(transactions.type, "income"),
+          isNull(transactions.deletedAt)
+        )
       ),
-    }),
-    db.query.accounts.findMany({
-      where: and(eq(accounts.householdId, householdId), eq(accounts.isActive, true), isNull(accounts.deletedAt)),
-    }),
+    db
+      .select({
+        total: sql<string>`coalesce(sum(${accounts.balance}), 0)`,
+      })
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.householdId, householdId),
+          eq(accounts.isActive, true),
+          isNull(accounts.deletedAt)
+        )
+      ),
   ]);
 
-  const totalBalance = allAccounts.reduce((s, a) => s + parseFloat(a.balance || "0"), 0);
+  const totalBalance = parseFloat(balanceResult[0]?.total || "0");
+  const pendingIncome = parseFloat(pendingResult[0]?.total || "0");
+  const pendingCount = pendingResult[0]?.count || 0;
+
   const monthlyIncome = monthlyTxs
     .filter((t) => t.type === "income" && t.status !== "pending")
     .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
   const monthlyExpenses = monthlyTxs
     .filter((t) => t.type === "expense" && t.status !== "pending")
-    .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
-  const pendingIncome = allPendingTxs
-    .filter((t) => t.type === "income")
     .reduce((s, t) => s + parseFloat(t.amount || "0"), 0);
 
   // Top categories by expense
@@ -646,7 +663,7 @@ export async function getDashboardKPIs() {
     monthlyIncome,
     monthlyExpenses,
     pendingIncome,
-    pendingCount: allPendingTxs.filter(t => t.type === "income").length,
+    pendingCount,
     netCashFlow: monthlyIncome - monthlyExpenses,
     topCategories,
     recentTransactions: monthlyTxs.slice(0, 5),
