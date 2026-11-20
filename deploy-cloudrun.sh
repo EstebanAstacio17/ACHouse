@@ -7,18 +7,26 @@ set -e
 
 echo "🚀 Iniciando despliegue de ACHouse en Google Cloud Run (Always Free Tier)..."
 
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
+  echo "🔍 Buscando proyectos disponibles en tu cuenta de Google Cloud..."
+  gcloud projects list || true
+  echo ""
+  read -p "👉 Copia y pega aquí el PROJECT_ID que deseas usar: " INPUT_ID
+  if [ -z "$INPUT_ID" ]; then
+    echo "❌ No se ingresó ningún proyecto. Por favor selecciona o crea un proyecto."
+    exit 1
+  fi
+  gcloud config set project "$INPUT_ID"
+  PROJECT_ID="$INPUT_ID"
+fi
+
+echo "📦 Proyecto seleccionado: $PROJECT_ID"
+
 SERVICE_NAME="achouse"
 REGION="us-east1" # Región con nivel Always Free Tier de Google Cloud
 
-PROJECT_ID=$(gcloud config get-value project)
-if [ -z "$PROJECT_ID" ]; then
-  echo "❌ Error: No hay ningún proyecto seleccionado en gcloud."
-  echo "Ejecuta: gcloud config set project TU_PROJECT_ID"
-  exit 1
-fi
-echo "📦 Proyecto de Google Cloud: $PROJECT_ID"
-
-echo "⚙️ Habilitando APIs necesarias..."
+echo "⚙️ Habilitando APIs necesarias (Cloud Run y Cloud Build)..."
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com
 
 echo "🏗️ Compilando contenedor y desplegando en Cloud Run..."
