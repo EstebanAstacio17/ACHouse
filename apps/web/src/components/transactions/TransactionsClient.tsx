@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import {
   Plus, Search, Filter, Download, ArrowUpCircle, ArrowDownCircle,
   ArrowLeftRight, Pencil, Trash2, ChevronLeft, ChevronRight,
-  X, Check, Calendar, CreditCard, Tag, User, Paperclip, Repeat,
+  X, Check, Calendar, CreditCard, Banknote, Tag, User, Paperclip, Repeat,
   FileSpreadsheet, Eye, AlertCircle, Building2, Clock, CheckCircle2, DollarSign
 } from "lucide-react";
 import { format } from "date-fns";
@@ -36,9 +36,18 @@ export interface TransactionItem {
   isRecurring?: boolean;
   recurringFrequency?: string;
   notes?: string;
+  conceptType?: string | null;
+  costBreakdown?: Record<string, any> | null;
+  quoteId?: string | null;
 }
 
 const INITIAL_TRANSACTIONS: TransactionItem[] = [];
+
+const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const MONTH_FULL = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
 
 const TYPE_CONFIG = {
   income: { label: "Ingreso", color: "var(--color-income)", Icon: ArrowUpCircle, bg: "var(--color-income-dim)" },
@@ -268,6 +277,7 @@ function TransactionModal({
     toAccountId: initialData?.toAccount?.id || (accountsList[1]?.id || ""),
     memberId: initialMemberId,
     businessId: initialBusinessId,
+    conceptType: (initialData as any)?.conceptType ?? "",
     transferFlow: "expense" as "income" | "expense",
     status: initialData?.status ?? "cleared",
     isRecurring: initialData?.isRecurring ?? false,
@@ -397,6 +407,7 @@ function TransactionModal({
       toAccount: form.type === "transfer" && selectedToAcc ? { id: selectedToAcc.id, name: selectedToAcc.name } : null,
       member: selectedMem ? { id: selectedMem.id, displayName: selectedMem.displayName } : null,
       business: selectedBiz ? { id: selectedBiz.id, name: selectedBiz.name } : null,
+      conceptType: form.conceptType || undefined,
       isRecurring: form.isRecurring,
       recurringFrequency: form.isRecurring ? form.recurringFrequency : undefined,
       attachmentUrl: form.attachmentUrl || null,
@@ -789,6 +800,28 @@ function TransactionModal({
                     </select>
                   </div>
                 </div>
+
+                {/* Concept Pocket Selection */}
+                <div className="form-group">
+                  <label className="label">
+                    <Tag size={12} style={{ display: "inline", marginRight: 4 }} />
+                    Concepto / Bolsillo Contable (Opcional)
+                  </label>
+                  <select
+                    className="input"
+                    value={form.conceptType}
+                    onChange={e => set("conceptType", e.target.value)}
+                  >
+                    <option value="">(Automático según categoría)</option>
+                    <option value="income_sale">💵 Venta / Facturación a Cliente</option>
+                    <option value="material">🧵 Insumos / Filamento / Papel / Materiales</option>
+                    <option value="energy">⚡ Consumo Eléctrico / Energía</option>
+                    <option value="wear_equipment">⚙️ Desgaste de Equipo / Mantenimiento</option>
+                    <option value="labor">👷 Mano de Obra / Sueldo Operador</option>
+                    <option value="profit_draw">🏦 Retiro de Ganancia a Cuenta Personal</option>
+                    <option value="operational_expense">📦 Gasto Operativo General</option>
+                  </select>
+                </div>
               </>
             )}
 
@@ -867,10 +900,49 @@ export function TransactionsClient() {
   const [filterAccount, setFilterAccount] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterBusiness, setFilterBusiness] = useState("all");
+  const [filterMember, setFilterMember] = useState("all");
+  const [filterConcept, setFilterConcept] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [datePreset, setDatePreset] = useState<"all" | "thisMonth" | "today">("all");
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const [dateFilterMode, setDateFilterMode] = useState<"month" | "all" | "today">("month");
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [page, setPage] = useState(1);
   const perPage = 8;
+
+  const isCurrentMonth = selectedMonth === currentMonth && selectedYear === currentYear;
+
+  const handlePrevMonth = () => {
+    if (selectedMonth === 0) {
+      setSelectedMonth(11);
+      setSelectedYear(y => y - 1);
+    } else {
+      setSelectedMonth(m => m - 1);
+    }
+    setDateFilterMode("month");
+    setPage(1);
+  };
+
+  const handleNextMonth = () => {
+    if (selectedMonth === 11) {
+      setSelectedMonth(0);
+      setSelectedYear(y => y + 1);
+    } else {
+      setSelectedMonth(m => m + 1);
+    }
+    setDateFilterMode("month");
+    setPage(1);
+  };
+
+  const handleGoCurrentMonth = () => {
+    setSelectedMonth(currentMonth);
+    setSelectedYear(currentYear);
+    setDateFilterMode("month");
+    setPage(1);
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -885,6 +957,16 @@ export function TransactionsClient() {
       }
       if (params.get("new") === "true") {
         setShowModal(true);
+      }
+      const monthParam = params.get("month");
+      if (monthParam !== null) {
+        setSelectedMonth(parseInt(monthParam, 10));
+        setDateFilterMode("month");
+      }
+      const yearParam = params.get("year");
+      if (yearParam !== null) {
+        setSelectedYear(parseInt(yearParam, 10));
+        setDateFilterMode("month");
       }
     }
   }, []);
@@ -940,7 +1022,7 @@ export function TransactionsClient() {
       .catch(() => {});
 
     Promise.all([
-      getTransactions({ perPage: 100 }),
+      getTransactions({ perPage: 0 }),
       getAccounts(),
       getCategories(),
       getMembers(),
@@ -997,9 +1079,12 @@ export function TransactionsClient() {
               status: t.status as any,
               category: t.category ? { id: t.category.id, name: t.category.name, color: t.category.color } : null,
               account: t.account ? { id: t.account.id, name: t.account.name } : { name: "Cuenta" },
-              toAccount: t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null,
+              toAccount: (t.toAccount ? { id: t.toAccount.id, name: t.toAccount.name } : null) || (t.toAccountId && accs?.find((a: any) => a.id === t.toAccountId) ? { id: t.toAccountId, name: accs.find((a: any) => a.id === t.toAccountId)?.name } : null),
               member: t.member ? { id: t.member.id, displayName: formatMemberName(t.member.displayName) } : null,
               business: bizObj,
+              conceptType: t.conceptType || null,
+              costBreakdown: t.costBreakdown || null,
+              quoteId: t.quoteId || null,
               isRecurring: t.isRecurring,
               notes: t.notes,
             };
@@ -1050,20 +1135,25 @@ export function TransactionsClient() {
         (filterBusiness === "none" && !tx.business) ||
         (tx.business && (tx.business.id === filterBusiness || (businessesList.find(b => b.id === filterBusiness)?.name.toLowerCase().trim() === tx.category?.name?.toLowerCase().trim())));
       const matchStatus = filterStatus === "all" || tx.status === filterStatus;
+      const matchMember = filterMember === "all" || tx.member?.id === filterMember;
+      const matchConcept = filterConcept === "all" || tx.conceptType === filterConcept;
 
       let matchDate = true;
-      if (datePreset === "today") {
+      if (filterStatus === "pending" || tx.status === "pending") {
+        // "lo de la deuda a menos que se registre como cobrado debe de mantenerse pendiente":
+        // Las deudas y cobros pendientes se mantienen pendientes sin importar su fecha original hasta ser cobradas
+        matchDate = true;
+      } else if (dateFilterMode === "today") {
         const todayStr = format(new Date(), "yyyy-MM-dd");
         matchDate = format(tx.date, "yyyy-MM-dd") === todayStr;
-      } else if (datePreset === "thisMonth") {
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        matchDate = tx.date.getMonth() === currentMonth && tx.date.getFullYear() === currentYear;
+      } else if (dateFilterMode === "month") {
+        matchDate = tx.date.getMonth() === selectedMonth && tx.date.getFullYear() === selectedYear;
       }
+      // Si dateFilterMode === "all", matchDate es true
 
-      return matchSearch && matchType && matchAccount && matchCategory && matchBusiness && matchStatus && matchDate;
+      return matchSearch && matchType && matchAccount && matchCategory && matchBusiness && matchStatus && matchMember && matchConcept && matchDate;
     });
-  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterBusiness, businessesList, filterStatus, datePreset]);
+  }, [transactionsList, search, filterType, filterAccount, filterCategory, filterBusiness, filterMember, filterConcept, businessesList, filterStatus, dateFilterMode, selectedMonth, selectedYear]);
 
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
@@ -1132,6 +1222,7 @@ export function TransactionsClient() {
           accountId: saved.account?.id || undefined,
           memberId: saved.member?.id || undefined,
           businessId: resolvedBiz?.id || undefined,
+          conceptType: saved.conceptType || undefined,
           date: saved.date ? saved.date.toISOString() : undefined,
         });
         if (res && !res.success) {
@@ -1151,6 +1242,7 @@ export function TransactionsClient() {
           categoryId: saved.category?.id || undefined,
           memberId: saved.member?.id || undefined,
           businessId: resolvedBiz?.id || undefined,
+          conceptType: saved.conceptType || undefined,
           date: saved.date ? saved.date.toISOString() : new Date().toISOString(),
           status: saved.status || "cleared",
           isRecurring: Boolean(saved.isRecurring),
@@ -1280,9 +1372,78 @@ export function TransactionsClient() {
       <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div className="page-header" style={{ marginBottom: 0 }}>
-            <h1 className="page-title">Transacciones</h1>
-            <p className="page-subtitle">{filtered.length} transacciones registradas</p>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", flexWrap: "wrap" }}>
+              <h1 className="page-title" style={{ margin: 0 }}>Transacciones</h1>
+
+              {dateFilterMode === "month" && (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.25rem",
+                    background: "var(--bg-card)",
+                    padding: "0.2rem 0.4rem",
+                    borderRadius: "var(--radius-lg)",
+                    border: "1px solid var(--border-default)",
+                  }}
+                >
+                  <button
+                    onClick={handlePrevMonth}
+                    className="btn btn-ghost btn-icon btn-sm"
+                    title={`Mes anterior (${MONTH_FULL[(selectedMonth + 11) % 12]})`}
+                    style={{ width: 28, height: 28 }}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span style={{ fontSize: "0.875rem", fontWeight: 700, padding: "0 0.25rem", color: "var(--text-primary)" }}>
+                    {MONTH_FULL[selectedMonth]} {selectedYear}
+                  </span>
+                  <button
+                    onClick={handleNextMonth}
+                    className="btn btn-ghost btn-icon btn-sm"
+                    title={`Mes siguiente (${MONTH_FULL[(selectedMonth + 1) % 12]})`}
+                    style={{ width: 28, height: 28 }}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+
+              {dateFilterMode === "month" && isCurrentMonth && (
+                <span
+                  style={{
+                    fontSize: "0.72rem",
+                    fontWeight: 700,
+                    background: "var(--accent-subtle)",
+                    color: "var(--accent)",
+                    padding: "0.2rem 0.6rem",
+                    borderRadius: "var(--radius-full)",
+                    border: "1px solid var(--accent-glow)",
+                  }}
+                >
+                  Mes en curso
+                </span>
+              )}
+
+              {dateFilterMode === "month" && !isCurrentMonth && (
+                <button
+                  onClick={handleGoCurrentMonth}
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: "0.75rem", color: "var(--accent)", textDecoration: "underline", padding: "0.2rem 0.5rem" }}
+                >
+                  Volver al mes en curso
+                </button>
+              )}
+            </div>
+
+            <p className="page-subtitle" style={{ marginTop: "0.25rem" }}>
+              {dateFilterMode === "month"
+                ? `${MONTH_FULL[selectedMonth]} ${selectedYear} · ${filtered.length} transacción${filtered.length === 1 ? "" : "es"} (${transactionsList.length} en historial total)`
+                : dateFilterMode === "today"
+                ? `Hoy · ${filtered.length} transacción${filtered.length === 1 ? "" : "es"}`
+                : `Todo el historial · ${filtered.length} transacciones registradas`}
+            </p>
           </div>
           <div style={{ display: "flex", gap: "0.625rem" }}>
             <button className="btn btn-secondary btn-sm" onClick={exportToExcel} title="Exportar a Excel">
@@ -1301,12 +1462,12 @@ export function TransactionsClient() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
           {[
             {
-              label: "Ingresos Recibidos",
+              label: dateFilterMode === "month" ? (isCurrentMonth ? "Ingresos del Mes" : `Ingresos (${MONTH_SHORT[selectedMonth]})`) : "Ingresos Recibidos",
               value: fmt(totals.income, householdCurrency),
               color: "var(--color-income)",
               bg: "var(--color-income-dim)",
               icon: ArrowUpCircle,
-              sub: "Efectivo y depositado",
+              sub: dateFilterMode === "month" ? (isCurrentMonth ? "Mes en curso" : `${MONTH_FULL[selectedMonth]} ${selectedYear}`) : "Efectivo y depositado",
             },
             {
               label: "Por Cobrar / Pendiente",
@@ -1314,20 +1475,20 @@ export function TransactionsClient() {
               color: "var(--color-warning)",
               bg: "var(--color-warning-dim)",
               icon: Clock,
-              sub: `${pendingStats.count} cobro${pendingStats.count === 1 ? "" : "s"} de clientes`,
+              sub: `${pendingStats.count} cobro${pendingStats.count === 1 ? "" : "s"} acumulados`,
               badgeAction: () => { setFilterStatus(filterStatus === "pending" ? "all" : "pending"); setPage(1); },
               badgeActive: filterStatus === "pending",
             },
             {
-              label: "Total Egresos",
+              label: dateFilterMode === "month" ? (isCurrentMonth ? "Gastos del Mes" : `Gastos (${MONTH_SHORT[selectedMonth]})`) : "Total Egresos",
               value: fmt(totals.expense, householdCurrency),
               color: "var(--color-expense)",
               bg: "var(--color-expense-dim)",
               icon: ArrowDownCircle,
-              sub: "Gastos y pagos",
+              sub: dateFilterMode === "month" ? (isCurrentMonth ? "Mes en curso" : `${MONTH_FULL[selectedMonth]} ${selectedYear}`) : "Gastos y pagos",
             },
             {
-              label: "Balance Neto Real",
+              label: dateFilterMode === "month" ? "Flujo Neto del Mes" : "Balance Neto Real",
               value: ((totals.income - totals.expense) >= 0 ? "+" : "-") + fmt(Math.abs(totals.income - totals.expense), householdCurrency),
               color: (totals.income - totals.expense) >= 0 ? "var(--color-income)" : "var(--color-expense)",
               bg: (totals.income - totals.expense) >= 0 ? "var(--color-income-dim)" : "var(--color-expense-dim)",
@@ -1414,20 +1575,27 @@ export function TransactionsClient() {
 
           {/* Date Presets */}
           <div style={{ display: "flex", gap: "0.375rem" }}>
-            {[
-              { id: "all", label: "Todo el tiempo" },
-              { id: "thisMonth", label: "Este mes" },
-              { id: "today", label: "Hoy" },
-            ].map(p => (
-              <button
-                key={p.id}
-                onClick={() => { setDatePreset(p.id as any); setPage(1); }}
-                className={`btn btn-sm ${datePreset === p.id ? "btn-secondary" : "btn-ghost"}`}
-                style={{ fontSize: "0.75rem", border: datePreset === p.id ? "1px solid var(--color-brand-400)" : "1px solid transparent" }}
-              >
-                {p.label}
-              </button>
-            ))}
+            <button
+              onClick={() => { setDateFilterMode("month"); setSelectedMonth(currentMonth); setSelectedYear(currentYear); setPage(1); }}
+              className={`btn btn-sm ${dateFilterMode === "month" && isCurrentMonth ? "btn-secondary" : "btn-ghost"}`}
+              style={{ fontSize: "0.75rem", border: dateFilterMode === "month" && isCurrentMonth ? "1px solid var(--color-brand-400)" : "1px solid transparent" }}
+            >
+              Mes en curso
+            </button>
+            <button
+              onClick={() => { setDateFilterMode("today"); setPage(1); }}
+              className={`btn btn-sm ${dateFilterMode === "today" ? "btn-secondary" : "btn-ghost"}`}
+              style={{ fontSize: "0.75rem", border: dateFilterMode === "today" ? "1px solid var(--color-brand-400)" : "1px solid transparent" }}
+            >
+              Hoy
+            </button>
+            <button
+              onClick={() => { setDateFilterMode("all"); setPage(1); }}
+              className={`btn btn-sm ${dateFilterMode === "all" ? "btn-secondary" : "btn-ghost"}`}
+              style={{ fontSize: "0.75rem", border: dateFilterMode === "all" ? "1px solid var(--color-brand-400)" : "1px solid transparent" }}
+            >
+              Todo el tiempo
+            </button>
           </div>
 
           {/* Business Filter */}
@@ -1460,6 +1628,43 @@ export function TransactionsClient() {
             <option value="cleared">✅ Conciliados / Recibidos</option>
             <option value="pending">⏳ Pendientes de Cobro / Entrada</option>
             <option value="reconciled">🔒 Reconciliados</option>
+          </select>
+
+          {/* Member Filter Dropdown */}
+          {membersList.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+              <User size={14} style={{ color: "var(--text-muted)" }} />
+              <select
+                className="input"
+                style={{ width: "auto", fontSize: "0.75rem", padding: "0.35rem 0.6rem" }}
+                value={filterMember}
+                onChange={e => { setFilterMember(e.target.value); setPage(1); }}
+              >
+                <option value="all">Todos los integrantes</option>
+                {membersList.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.displayName}{m.isCurrentUser || m.id === currentMemberId ? " (Tú)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Concept Filter Dropdown */}
+          <select
+            className="input"
+            style={{ width: "auto", fontSize: "0.75rem", padding: "0.35rem 0.6rem" }}
+            value={filterConcept}
+            onChange={e => { setFilterConcept(e.target.value); setPage(1); }}
+          >
+            <option value="all">Todos los conceptos / bolsillos</option>
+            <option value="income_sale">💵 Venta / Facturación</option>
+            <option value="material">🧵 Insumos / Materiales</option>
+            <option value="energy">⚡ Energía / Electricidad</option>
+            <option value="wear_equipment">⚙️ Desgaste / Mantenimiento</option>
+            <option value="labor">👷 Mano de Obra</option>
+            <option value="profit_draw">🏦 Retiro de Ganancias</option>
+            <option value="operational_expense">📦 Gasto Operativo</option>
           </select>
         </div>
 
@@ -1504,8 +1709,26 @@ export function TransactionsClient() {
                   return (
                     <tr key={tx.id} style={{ background: isPending ? "rgba(245, 158, 11, 0.03)" : undefined }}>
                       <td>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: typeCfg.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <typeCfg.Icon size={16} color={typeCfg.color} />
+                        <div style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: tx.conceptType === "loan_payment"
+                            ? "rgba(99, 102, 241, 0.15)"
+                            : (tx.conceptType === "card_payment" || (tx.type === "transfer" && tx.description.toLowerCase().includes("pago tarjeta")))
+                            ? "var(--color-warning-dim)"
+                            : typeCfg.bg,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center"
+                        }}>
+                          {tx.conceptType === "loan_payment" ? (
+                            <Banknote size={16} color="var(--accent)" />
+                          ) : (tx.conceptType === "card_payment" || (tx.type === "transfer" && tx.description.toLowerCase().includes("pago tarjeta"))) ? (
+                            <CreditCard size={16} color="var(--color-warning)" />
+                          ) : (
+                            <typeCfg.Icon size={16} color={typeCfg.color} />
+                          )}
                         </div>
                       </td>
                       <td>
@@ -1526,6 +1749,32 @@ export function TransactionsClient() {
                                 fontWeight: 600
                               }}>
                                 <Building2 size={10} /> {tx.business.name}
+                              </span>
+                            )}
+                            {tx.conceptType && (
+                              <span style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                fontSize: "0.6875rem",
+                                background: tx.conceptType === "loan_payment"
+                                  ? "rgba(99,102,241,0.15)"
+                                  : tx.conceptType === "card_payment"
+                                  ? "var(--color-warning-dim)"
+                                  : "rgba(99,102,241,0.12)",
+                                color: tx.conceptType === "card_payment" ? "var(--color-warning)" : "var(--accent)",
+                                border: tx.conceptType === "card_payment" ? "1px solid rgba(245, 158, 11, 0.3)" : "1px solid rgba(99,102,241,0.25)",
+                                padding: "0.1rem 0.4rem",
+                                borderRadius: 4,
+                                fontWeight: 600
+                              }}>
+                                {tx.conceptType === "loan_payment" ? (
+                                  <><Banknote size={10} /> Pago de Préstamo</>
+                                ) : tx.conceptType === "card_payment" ? (
+                                  <><CreditCard size={10} /> Pago de Tarjeta</>
+                                ) : (
+                                  <><Tag size={10} /> {tx.conceptType}</>
+                                )}
                               </span>
                             )}
                             {isPending && tx.type === "income" && (
@@ -1560,7 +1809,35 @@ export function TransactionsClient() {
                         </div>
                       </td>
                       <td>
-                        {tx.category ? (
+                        {tx.conceptType === "loan_payment" ? (
+                          <span style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.25rem",
+                            fontSize: "0.75rem",
+                            color: "var(--accent)",
+                            background: "rgba(99,102,241,0.1)",
+                            padding: "0.15rem 0.5rem",
+                            borderRadius: "var(--radius-sm)",
+                            fontWeight: 600
+                          }}>
+                            <Banknote size={12} /> Pago Préstamo
+                          </span>
+                        ) : tx.conceptType === "card_payment" || (tx.type === "transfer" && tx.description.toLowerCase().includes("pago tarjeta")) ? (
+                          <span style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.25rem",
+                            fontSize: "0.75rem",
+                            color: "var(--color-warning)",
+                            background: "var(--color-warning-dim)",
+                            padding: "0.15rem 0.5rem",
+                            borderRadius: "var(--radius-sm)",
+                            fontWeight: 600
+                          }}>
+                            <CreditCard size={12} /> Pago Tarjeta
+                          </span>
+                        ) : tx.category ? (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
                             <span style={{ width: 8, height: 8, borderRadius: "50%", background: tx.category.color, flexShrink: 0 }} />
                             {tx.category.name}
@@ -1572,12 +1849,16 @@ export function TransactionsClient() {
                         )}
                       </td>
                       <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
-                        {tx.account.name}
-                        {tx.toAccount && (
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", display: "block" }}>
-                            → {tx.toAccount.name}
+                        <span style={{ fontWeight: 600 }}>{tx.account.name}</span>
+                        {tx.toAccount ? (
+                          <span style={{ color: "var(--color-warning)", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: 3, marginTop: 2, fontWeight: 500 }}>
+                            → 💳 {tx.toAccount.name}
                           </span>
-                        )}
+                        ) : (tx.conceptType === "loan_payment" || tx.description.toLowerCase().includes("pago préstamo") || tx.description.toLowerCase().includes("pago prestamo")) ? (
+                          <span style={{ color: "var(--accent)", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: 3, marginTop: 2, fontWeight: 500 }}>
+                            → 🏦 {tx.description.replace(/^Pago Préstamo:s*|^Pago Prestamo:s*/i, "")}
+                          </span>
+                        ) : null}
                       </td>
                       <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{formatMemberName(tx.member?.displayName)}</td>
                       <td style={{ fontSize: "0.8125rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>

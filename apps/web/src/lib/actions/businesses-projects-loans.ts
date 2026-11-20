@@ -5,6 +5,7 @@ import { db } from "@achouse/db";
 import {
   businesses,
   businessTransactions,
+  businessQuotes,
   projects,
   projectTransactions,
   loans,
@@ -23,9 +24,23 @@ import { syncBusinessCategories } from "./entities";
 
 async function getAuthContext() {
   const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  if (!userId) throw new Error("No autorizado");
   const householdId = await getActiveHouseholdId();
-  return { userId, householdId };
+  if (!householdId) throw new Error("No hay hogar activo seleccionado");
+
+  const currentMember = await db.query.householdMembers.findFirst({
+    where: and(
+      eq(householdMembers.clerkUserId, userId),
+      eq(householdMembers.householdId, householdId),
+      eq(householdMembers.isActive, true)
+    ),
+  });
+
+  if (!currentMember) {
+    throw new Error("No tienes acceso activo a este hogar");
+  }
+
+  return { userId, householdId, currentMember, role: currentMember.role };
 }
 
 // ── Businesses ────────────────────────────────────────────────────────────────
@@ -34,7 +49,7 @@ export async function getBusinesses() {
   const { householdId } = await getAuthContext();
   await syncBusinessCategories(householdId);
 
-  const [bizList, txs, cats, membersList] = await Promise.all([
+  const [bizList, txs, cats, membersList, allQuotes] = await Promise.all([
     db.query.businesses.findMany({
       where: and(eq(businesses.householdId, householdId), isNull(businesses.deletedAt)),
       orderBy: (b, { asc }) => [asc(b.name)],
@@ -58,6 +73,13 @@ export async function getBusinesses() {
         eq(householdMembers.isActive, true)
       ),
       with: { incomeSources: true },
+    }),
+    db.query.businessQuotes.findMany({
+      where: and(
+        eq(businessQuotes.householdId, householdId),
+        isNull(businessQuotes.deletedAt)
+      ),
+      orderBy: (q, { desc }) => [desc(q.createdAt)],
     }),
   ]);
 
@@ -149,6 +171,81 @@ export async function getBusinesses() {
       monthlyMap.set(mKey, cur);
     });
 
+    // Calculate Concept Pockets from transactions and quote breakdowns
+    const pockets = {
+      material: 0,
+      energy: 0,
+      wearRisk: 0,
+      labor: 0,
+      profitDraw: 0,
+      overhead: 0,
+    };
+
+    bTxs.forEach((t) => {
+      const amt = parseFloat(t.amount || "0");
+      if (t.status === "pending") return;
+
+      if (t.costBreakdown && typeof t.costBreakdown === "object") {
+        const cb = t.costBreakdown as Record<string, number>;
+        if (cb.material) pockets.material += Number(cb.material);
+        if (cb.energy) pockets.energy += Number(cb.energy);
+        if (cb.wearRisk) pockets.wearRisk += Number(cb.wearRisk);
+        if (cb.labor) pockets.labor += Number(cb.labor);
+        if (cb.profit) pockets.profitDraw += Number(cb.profit);
+        if (cb.overhead) pockets.overhead += Number(cb.overhead);
+      } else if (t.conceptType === "material") {
+        pockets.material += amt;
+      } else if (t.conceptType === "energy") {
+        pockets.energy += amt;
+      } else if (t.conceptType === "wear_equipment") {
+        pockets.wearRisk += amt;
+      } else if (t.conceptType === "labor" || t.conceptType === "labor_salary") {
+        pockets.labor += amt;
+      } else if (t.conceptType === "profit_draw" || t.conceptType === "transfer_draw") {
+        pockets.profitDraw += amt;
+      }
+    });
+
+    // Member Contribution Breakdown
+    const memberMap = new Map<string, { memberId: string; name: string; avatarUrl?: string | null; income: number; expenses: number; net: number; count: number }>();
+    bTxs.forEach((t) => {
+      const memId = t.memberId || "unassigned";
+      const memObj = membersList.find((m) => m.id === memId);
+      const memName = memObj?.displayName || "Sin Asignar";
+      const cur = memberMap.get(memId) ?? {
+        memberId: memId,
+        name: memName,
+        avatarUrl: memObj?.avatarUrl,
+        income: 0,
+        expenses: 0,
+        net: 0,
+        count: 0,
+      };
+      const amt = parseFloat(t.amount || "0");
+      if (isIncomeTx(t) && t.status !== "pending") {
+        cur.income += amt;
+        cur.net += amt;
+      } else if (isExpenseTx(t) && t.status !== "pending") {
+        cur.expenses += amt;
+        cur.net -= amt;
+      }
+      cur.count += 1;
+      memberMap.set(memId, cur);
+    });
+
+    // Quotes Stats for this business
+    const bQuotes = allQuotes.filter((q) => q.businessId === b.id);
+    const quotesStats = {
+      totalCount: bQuotes.length,
+      quoteCount: bQuotes.filter((q) => q.paymentStatus === "quote").length,
+      pendingCount: bQuotes.filter((q) => q.paymentStatus === "pending").length,
+      partialCount: bQuotes.filter((q) => q.paymentStatus === "partial").length,
+      paidCount: bQuotes.filter((q) => q.paymentStatus === "paid").length,
+      totalQuoted: bQuotes.reduce((sum, q) => sum + parseFloat(q.totalAmount || "0"), 0),
+      totalPaid: bQuotes.reduce((sum, q) => sum + parseFloat(q.paidAmount || "0"), 0),
+      totalRemaining: bQuotes.reduce((sum, q) => sum + parseFloat(q.remainingAmount || "0"), 0),
+    };
+
     return {
       ...b,
       income,
@@ -157,6 +254,10 @@ export async function getBusinesses() {
       pendingExpenses,
       net,
       projectedNet,
+      pockets,
+      memberBreakdown: Array.from(memberMap.values()),
+      quotesStats,
+      quotes: bQuotes.slice(0, 5),
       transactions: bTxs.length,
       pendingCount: pendingList.length,
       pendingTransactions: pendingList,
@@ -581,9 +682,15 @@ export async function createLoan(data: {
 export async function registerLoanPayment(loanId: string, data: {
   amount: number; principalPaid: number; interestPaid: number; date: string; notes?: string;
 }) {
-  const { householdId } = await getAuthContext();
-  const loan = await db.query.loans.findFirst({ where: eq(loans.id, loanId) });
-  if (!loan) throw new Error("Loan not found");
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden registrar pagos de préstamos");
+  }
+
+  const loan = await db.query.loans.findFirst({
+    where: and(eq(loans.id, loanId), eq(loans.householdId, householdId)),
+  });
+  if (!loan) throw new Error("Préstamo no encontrado en este hogar");
 
   const [payment] = await db.insert(loanPayments).values({
     loanId,
@@ -595,7 +702,15 @@ export async function registerLoanPayment(loanId: string, data: {
   }).returning();
 
   const newBalance = Math.max(0, parseFloat(loan.remainingBalance) - data.principalPaid);
-  await db.update(loans).set({ remainingBalance: newBalance.toString() }).where(eq(loans.id, loanId));
+  const isSettled = newBalance <= 0.001;
+  await db
+    .update(loans)
+    .set({
+      remainingBalance: newBalance.toFixed(2),
+      isActive: !isSettled,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(loans.id, loanId), eq(loans.householdId, householdId)));
 
   revalidatePath("/dashboard/loans");
   return { success: true, payment };

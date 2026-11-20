@@ -29,7 +29,7 @@ async function getAuthenticatedMember() {
       return { userId, householdId: null, member: null, error: "No hay hogar activo seleccionado" };
     }
 
-    let member = await db.query.householdMembers.findFirst({
+    const member = await db.query.householdMembers.findFirst({
       where: and(
         eq(householdMembers.clerkUserId, userId),
         eq(householdMembers.householdId, householdId),
@@ -37,24 +37,8 @@ async function getAuthenticatedMember() {
       ),
     });
 
-    // Fallback: search for member by clerkUserId regardless of active flag or household
     if (!member) {
-      member = await db.query.householdMembers.findFirst({
-        where: and(eq(householdMembers.clerkUserId, userId), eq(householdMembers.householdId, householdId)),
-      });
-    }
-
-    if (!member) {
-      member = await db.query.householdMembers.findFirst({
-        where: and(eq(householdMembers.clerkUserId, userId), eq(householdMembers.isActive, true)),
-      });
-    }
-
-    // Fallback: pick any active member of this household
-    if (!member) {
-      member = await db.query.householdMembers.findFirst({
-        where: and(eq(householdMembers.householdId, householdId), eq(householdMembers.isActive, true)),
-      });
+      return { userId, householdId, member: null, error: "No tienes acceso activo a este hogar" };
     }
 
     return { userId, householdId, member, error: null };
@@ -73,6 +57,7 @@ export async function getTransactions(filters?: {
   memberId?: string;
   accountId?: string;
   businessId?: string;
+  conceptType?: string;
   search?: string;
   page?: number;
   perPage?: number;
@@ -82,9 +67,10 @@ export async function getTransactions(filters?: {
     return [];
   }
   const { householdId } = authCtx;
+  const isAll = filters?.perPage === 0 || filters?.perPage === -1;
   const page = filters?.page ?? 1;
-  const perPage = filters?.perPage ?? 50;
-  const offset = (page - 1) * perPage;
+  const perPage = isAll ? 5000 : (filters?.perPage ?? 50);
+  const offset = isAll ? 0 : (page - 1) * perPage;
 
   const conditions = [
     eq(transactions.householdId, householdId),
@@ -112,6 +98,9 @@ export async function getTransactions(filters?: {
   if (filters?.businessId) {
     conditions.push(eq(transactions.businessId, filters.businessId));
   }
+  if (filters?.conceptType) {
+    conditions.push(eq(transactions.conceptType, filters.conceptType));
+  }
   if (filters?.search) {
     conditions.push(ilike(transactions.description, `%${filters.search}%`));
   }
@@ -124,6 +113,7 @@ export async function getTransactions(filters?: {
     with: {
       category: true,
       account: true,
+      toAccount: true,
       member: true,
       business: true,
     },
@@ -249,6 +239,9 @@ export async function createTransaction(data: z.input<typeof transactionSchema>)
         status: parsed.status,
         isRecurring: parsed.isRecurring,
         toAccountId: parsed.toAccountId ?? null,
+        conceptType: parsed.conceptType ?? null,
+        costBreakdown: parsed.costBreakdown ?? null,
+        quoteId: parsed.quoteId ?? null,
         createdBy: userId,
       })
       .returning();
@@ -572,6 +565,21 @@ export async function deleteTransaction(id: string) {
         if (account) {
           const cur = parseFloat(account.balance || "0");
           await db.update(accounts).set({ balance: (cur + numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, account.id));
+        }
+      } else if (existing.type === "transfer") {
+        // Revert origin: restore amount
+        const fromAccount = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.accountId) });
+        if (fromAccount) {
+          const cur = parseFloat(fromAccount.balance || "0");
+          await db.update(accounts).set({ balance: (cur + numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, fromAccount.id));
+        }
+        // Revert destination: remove transferred amount
+        if (existing.toAccountId) {
+          const toAccount = await db.query.accounts.findFirst({ where: eq(accounts.id, existing.toAccountId) });
+          if (toAccount) {
+            const toCur = parseFloat(toAccount.balance || "0");
+            await db.update(accounts).set({ balance: (toCur - numAmount).toFixed(2), updatedAt: new Date() }).where(eq(accounts.id, toAccount.id));
+          }
         }
       }
     }

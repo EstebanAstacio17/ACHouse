@@ -3,6 +3,7 @@ import {
   TrendingUp, TrendingDown, Wallet, ArrowUpDown,
   AlertCircle, CheckCircle2, ArrowRight,
   Plus, UserPlus, CreditCard, Zap, Clock,
+  ChevronLeft, ChevronRight, Calendar,
 } from "lucide-react";
 import Link from "next/link";
 import { MonthlyCashflowChart } from "@/components/charts/MonthlyCashflowChart";
@@ -43,7 +44,30 @@ const MONTH_FULL = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ month?: string; year?: string }>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  // Selected month and year (default to current month)
+  const selectedMonth = params?.month !== undefined ? parseInt(params.month, 10) : currentMonth;
+  const selectedYear = params?.year !== undefined ? parseInt(params.year, 10) : currentYear;
+  const isCurrentMonth = selectedMonth === currentMonth && selectedYear === currentYear;
+
+  // Navigation targets
+  const prevDate = new Date(selectedYear, selectedMonth - 1, 1);
+  const prevMonth = prevDate.getMonth();
+  const prevYear = prevDate.getFullYear();
+
+  const nextDate = new Date(selectedYear, selectedMonth + 1, 1);
+  const nextMonth = nextDate.getMonth();
+  const nextYear = nextDate.getFullYear();
+
   let accountsList: any[] = [];
   let txList: any[] = [];
   let household: any = null;
@@ -51,7 +75,7 @@ export default async function DashboardPage() {
   try {
     const [accs, txs, h] = await Promise.all([
       getAccounts(),
-      getTransactions({ perPage: 100 }),
+      getTransactions({ perPage: 0 }), // Cargar todas para que ninguna deuda/cobro quede truncada
       getActiveHousehold(),
     ]);
     accountsList = accs || [];
@@ -65,13 +89,10 @@ export default async function DashboardPage() {
 
   const totalBalance = accountsList.reduce((sum, a) => sum + parseFloat(a.balance || "0"), 0);
 
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-
+  // Transacciones del mes seleccionado (del mes en curso por defecto)
   const thisMonthTxs = txList.filter(t => {
     const d = new Date(t.date);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
   });
 
   const monthIncome = thisMonthTxs
@@ -82,27 +103,28 @@ export default async function DashboardPage() {
     .filter(t => t.type === "expense" && t.status !== "pending")
     .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
 
-  const pendingIncomeTotal = txList
-    .filter(t => t.type === "income" && t.status === "pending")
-    .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
-
-  const pendingIncomeCount = txList.filter(t => t.type === "income" && t.status === "pending").length;
+  // Cuentas por cobrar / Deudas pendientes de clientes y negocios:
+  // "y lo de la deuda a menos que se registre como cobrado debe de mantenerse pendiente"
+  // Acumula todas las deudas pendientes sin importar su fecha original hasta que sean cobradas.
+  const allPendingIncomeTxs = txList.filter(t => t.type === "income" && t.status === "pending");
+  const pendingIncomeTotal = allPendingIncomeTxs.reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+  const pendingIncomeCount = allPendingIncomeTxs.length;
 
   const netFlow = monthIncome - monthExpense;
 
   // Compute 6 months of historical cashflow
   const monthlyCashflowData = Array.from({ length: 6 }).map((_, idx) => {
-    const d = new Date(currentYear, currentMonth - (5 - idx), 1);
+    const d = new Date(selectedYear, selectedMonth - (5 - idx), 1);
     const m = d.getMonth();
     const y = d.getFullYear();
     const label = `${MONTH_SHORT[m]} ${y.toString().slice(-2)}`;
 
     const mIncome = txList
-      .filter(t => t.type === "income" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
+      .filter(t => t.type === "income" && t.status !== "pending" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
       .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
 
     const mExpense = txList
-      .filter(t => t.type === "expense" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
+      .filter(t => t.type === "expense" && t.status !== "pending" && new Date(t.date).getMonth() === m && new Date(t.date).getFullYear() === y)
       .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
 
     return {
@@ -171,7 +193,7 @@ export default async function DashboardPage() {
 
   const kpis = [
     {
-      label: "Balance Total",
+      label: "Balance en Cuentas",
       value: fmtCurrency(totalBalance),
       change: accountsList.length > 0 ? `${accountsList.length} cuentas` : "Sin cuentas",
       positive: totalBalance >= 0,
@@ -179,32 +201,32 @@ export default async function DashboardPage() {
       color: "var(--accent)",
       bg: "var(--accent-subtle)",
       border: "var(--accent-glow)",
-      sub: "Todas las cuentas",
+      sub: "Saldo actual acumulado",
     },
     {
-      label: "Ingresos del Mes",
+      label: isCurrentMonth ? "Ingresos del Mes" : `Ingresos (${MONTH_SHORT[selectedMonth]})`,
       value: fmtCurrency(monthIncome),
-      change: `${thisMonthTxs.filter(t => t.type === "income").length} ingresos`,
+      change: `${thisMonthTxs.filter(t => t.type === "income" && t.status !== "pending").length} ingresos`,
       positive: true,
       icon: TrendingUp,
       color: "var(--color-income)",
       bg: "var(--color-income-dim)",
       border: "var(--color-income-dim)",
-      sub: "Mes actual",
+      sub: isCurrentMonth ? "Mes en curso" : `${MONTH_SHORT[selectedMonth]} ${selectedYear}`,
     },
     {
-      label: "Gastos del Mes",
+      label: isCurrentMonth ? "Gastos del Mes" : `Gastos (${MONTH_SHORT[selectedMonth]})`,
       value: fmtCurrency(monthExpense),
-      change: `${thisMonthTxs.filter(t => t.type === "expense").length} gastos`,
+      change: `${thisMonthTxs.filter(t => t.type === "expense" && t.status !== "pending").length} gastos`,
       positive: false,
       icon: TrendingDown,
       color: "var(--color-expense)",
       bg: "var(--color-expense-dim)",
       border: "var(--color-expense-dim)",
-      sub: "Mes actual",
+      sub: isCurrentMonth ? "Mes en curso" : `${MONTH_SHORT[selectedMonth]} ${selectedYear}`,
     },
     {
-      label: "Flujo Neto",
+      label: isCurrentMonth ? "Flujo Neto" : `Flujo Neto (${MONTH_SHORT[selectedMonth]})`,
       value: fmtCurrency(netFlow),
       change: netFlow >= 0 ? "Superávit" : "Déficit",
       positive: netFlow >= 0,
@@ -216,7 +238,8 @@ export default async function DashboardPage() {
     },
   ];
 
-  const recentTransactions = txList.slice(0, 6).map(t => ({
+  const monthDisplayTxs = thisMonthTxs.length > 0 ? thisMonthTxs : txList;
+  const recentTransactions = monthDisplayTxs.slice(0, 8).map(t => ({
     id: t.id,
     description: t.description,
     category: t.category?.name || "General",
@@ -249,8 +272,69 @@ export default async function DashboardPage() {
         }}
       >
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">{MONTH_FULL[currentMonth]} {currentYear} · {household?.name || "Mi Hogar"}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", flexWrap: "wrap" }}>
+            <h1 className="page-title" style={{ margin: 0 }}>Dashboard</h1>
+
+            {/* Selector de Mes */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.25rem",
+                background: "var(--bg-card)",
+                padding: "0.2rem 0.4rem",
+                borderRadius: "var(--radius-lg)",
+                border: "1px solid var(--border-default)",
+              }}
+            >
+              <Link
+                href={`/dashboard?month=${prevMonth}&year=${prevYear}`}
+                className="btn btn-ghost btn-icon btn-sm"
+                title={`Mes anterior (${MONTH_FULL[prevMonth]} ${prevYear})`}
+                style={{ width: 28, height: 28 }}
+              >
+                <ChevronLeft size={16} />
+              </Link>
+              <span style={{ fontSize: "0.875rem", fontWeight: 700, padding: "0 0.25rem", color: "var(--text-primary)" }}>
+                {MONTH_FULL[selectedMonth]} {selectedYear}
+              </span>
+              <Link
+                href={`/dashboard?month=${nextMonth}&year=${nextYear}`}
+                className="btn btn-ghost btn-icon btn-sm"
+                title={`Mes siguiente (${MONTH_FULL[nextMonth]} ${nextYear})`}
+                style={{ width: 28, height: 28 }}
+              >
+                <ChevronRight size={16} />
+              </Link>
+            </div>
+
+            {isCurrentMonth ? (
+              <span
+                style={{
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  background: "var(--accent-subtle)",
+                  color: "var(--accent)",
+                  padding: "0.2rem 0.6rem",
+                  borderRadius: "var(--radius-full)",
+                  border: "1px solid var(--accent-glow)",
+                }}
+              >
+                Mes en curso
+              </span>
+            ) : (
+              <Link
+                href="/dashboard"
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: "0.75rem", color: "var(--accent)", textDecoration: "underline", padding: "0.2rem 0.5rem" }}
+              >
+                Volver al mes en curso
+              </Link>
+            )}
+          </div>
+          <p className="page-subtitle" style={{ marginTop: "0.25rem" }}>
+            {MONTH_FULL[selectedMonth]} {selectedYear} · {household?.name || "Mi Hogar"}
+          </p>
         </div>
 
         {/* Quick Actions */}
@@ -359,7 +443,7 @@ export default async function DashboardPage() {
           className="animate-fade-in-up"
           style={{
             background: "var(--color-warning-dim)",
-            border: "1px solid rgba(245, 158, 11, 0.3)",
+            border: "1px solid rgba(245, 158, 11, 0.35)",
             borderRadius: "var(--radius-lg)",
             padding: "1rem 1.25rem",
             display: "flex",
@@ -372,25 +456,26 @@ export default async function DashboardPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "0.875rem" }}>
             <div
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 10,
+                width: 42,
+                height: 42,
+                borderRadius: 12,
                 background: "var(--color-warning)",
                 color: "#fff",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
+                boxShadow: "0 4px 10px rgba(245, 158, 11, 0.3)",
               }}
             >
-              <Clock size={20} />
+              <Clock size={22} />
             </div>
             <div>
-              <p style={{ fontWeight: 700, fontSize: "0.9375rem", margin: 0, color: "var(--text-primary)" }}>
+              <p style={{ fontWeight: 800, fontSize: "0.95rem", margin: 0, color: "var(--text-primary)" }}>
                 Tienes {pendingIncomeCount} cobro{pendingIncomeCount === 1 ? "" : "s"} pendiente{pendingIncomeCount === 1 ? "" : "s"} por entrar ({fmtCurrency(pendingIncomeTotal)})
               </p>
-              <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: "0.125rem 0 0" }}>
-                Dinero pendiente de recibir de clientes o negocios. No afectará tu saldo bancario hasta que confirmes su cobro.
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", margin: "0.15rem 0 0" }}>
+                Dinero adeudado por clientes o negocios. <strong>Se mantiene pendiente</strong> sin importar el mes hasta que se registre como cobrado.
               </p>
             </div>
           </div>
@@ -406,9 +491,11 @@ export default async function DashboardPage() {
               display: "inline-flex",
               alignItems: "center",
               gap: "0.375rem",
+              padding: "0.5rem 1rem",
+              borderRadius: "var(--radius-md)",
             }}
           >
-            Ver y Confirmar Cobros <ArrowRight size={14} />
+            Ver y Confirmar Cobros ({pendingIncomeCount}) <ArrowRight size={14} />
           </Link>
         </div>
       )}

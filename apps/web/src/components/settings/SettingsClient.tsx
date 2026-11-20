@@ -11,13 +11,14 @@ import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/ToastContext";
 import { COUNTRIES, CURRENCIES, TIMEZONES } from "@/lib/geo";
 import { useSessionSecurity } from "@/components/shared/SessionSecurityProvider";
+import { reconcileAllAccountBalances } from "@/lib/actions/entities";
 
 const INITIAL_AUDIT_LOGS: Array<{ id: string; action: string; entity: string; user: string; date: Date }> = [];
 
 export function SettingsClient() {
   const toast = useToast();
   const [tab, setTab] = useState<"general" | "security" | "audit" | "backup">("general");
-  
+
   // Session Security Context
   const {
     config: sessionConfig,
@@ -30,20 +31,22 @@ export function SettingsClient() {
   } = useSessionSecurity();
 
   // General Settings Form
+  const [householdId, setHouseholdId] = useState("");
   const [householdName, setHouseholdName] = useState("Mi Hogar");
   const [country, setCountry] = useState("DO");
   const [currency, setCurrency] = useState("DOP");
   const [timezone, setTimezone] = useState("America/Santo_Domingo");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [reconciliationReport, setReconciliationReport] = useState<any[] | null>(null);
 
   const formatSeconds = (s: number) => {
     const mins = Math.floor(s / 60);
     const secs = s % 60;
     return `${mins}m ${secs < 10 ? "0" : ""}${secs}s`;
   };
-
-
 
   useEffect(() => {
     fetch("/api/households")
@@ -52,6 +55,7 @@ export function SettingsClient() {
         if (data.households && data.households.length > 0) {
           const current = data.households.find((h: any) => h.id === data.activeHouseholdId) || data.households[0];
           if (current) {
+            setHouseholdId(current.id);
             setHouseholdName(current.name || "Mi Hogar");
             if (current.country) setCountry(current.country);
             setCurrency(current.defaultCurrency || "DOP");
@@ -124,29 +128,56 @@ export function SettingsClient() {
     }
   };
 
-  const handleExportBackup = () => {
-    const backupData = {
-      version: "1.0.0",
-      exportDate: new Date().toISOString(),
-      household: {
-        name: householdName,
-        country,
-        currency,
-        timezone,
-      },
-      metadata: "ACHouse Complete Financial Backup",
-    };
+  const handleExportBackup = async () => {
+    if (!householdId) {
+      toast.error("No se detectó el hogar activo");
+      return;
+    }
+    setIsExporting(true);
+    toast.info("Generando copia de seguridad completa...");
+    try {
+      const res = await fetch(`/api/households/${householdId}/backup`);
+      if (!res.ok) throw new Error("Error en el servidor al exportar el respaldo");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `achouse-backup-${householdName.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Respaldo de la base de datos descargado con éxito");
+    } catch (err: any) {
+      toast.error(err.message || "Error al descargar el respaldo");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `achouse-backup-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success("Copia de seguridad descargada exitosamente");
+  const handleReconcileBalances = async (applyFix = false) => {
+    setIsReconciling(true);
+    toast.info(applyFix ? "Sincronizando saldos contables..." : "Auditando saldos contables frente a transacciones...");
+    try {
+      const res = await reconcileAllAccountBalances({ applyFix });
+      if (res && res.success) {
+        setReconciliationReport(res.report);
+        const adjusted = res.report.filter((r: any) => !r.isReconciled);
+        if (adjusted.length > 0) {
+          if (applyFix) {
+            toast.success(`Se sincronizaron ${adjusted.length} cuentas con el historial de transacciones`);
+          } else {
+            toast.info(`Auditoría lista: ${adjusted.length} cuentas con diferencia (incluye saldos iniciales previos).`);
+          }
+        } else {
+          toast.success("¡Todos los saldos de tus cuentas coinciden exactamente con sus transacciones!");
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Error al auditar saldos");
+    } finally {
+      setIsReconciling(false);
+    }
   };
 
   return (
@@ -656,26 +687,117 @@ export function SettingsClient() {
         </div>
       )}
 
-      {/* Tab 3: Backup */}
+      {/* Tab 4: Backup & Balance Integrity */}
       {tab === "backup" && (
-        <div className="card" style={{ maxWidth: 650, display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--color-income-dim)", color: "var(--color-income)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <FileJson size={22} />
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", maxWidth: 800 }}>
+          {/* Card 1: Full Database JSON Backup */}
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--color-income-dim)", color: "var(--color-income)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <FileJson size={22} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: "1.0625rem", fontWeight: 700 }}>Exportar Copia de Seguridad Completa (PostgreSQL Snapshot)</h3>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+                  Descarga un archivo JSON estructurado con todos los datos reales y registros de tu hogar.
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 style={{ fontSize: "1.0625rem", fontWeight: 700 }}>Exportar Copia de Seguridad Completa</h3>
-              <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-                Descarga un archivo JSON estructurado con todos los datos financieros de tu hogar.
-              </p>
-            </div>
+            <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+              Esta copia extrae en tiempo real de la base de datos todas las cuentas, transacciones históricas, categorías, integrantes, negocios, cotizaciones y proyectos registrados.
+            </p>
+            <button
+              className="btn btn-primary"
+              onClick={handleExportBackup}
+              disabled={isExporting}
+              style={{ alignSelf: "flex-start" }}
+            >
+              <Download size={16} /> {isExporting ? "Generando Respaldo..." : "Descargar Archivo de Respaldo (.json)"}
+            </button>
           </div>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
-            Esta copia incluye todas las cuentas, transacciones históricas, categorías, integrantes y proyectos registrados en la plataforma.
-          </p>
-          <button className="btn btn-primary" onClick={handleExportBackup} style={{ alignSelf: "flex-start" }}>
-            <Download size={16} /> Descargar Archivo de Respaldo (.json)
-          </button>
+
+          {/* Card 2: Automatic Balance Reconciliation */}
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent-subtle)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <ShieldCheck size={22} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: "1.0625rem", fontWeight: 700 }}>Verificación y Conciliación Contable de Saldos</h3>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+                  Audita y recalcula el saldo de cada cuenta bancaria o caja sumando todas sus transacciones conciliadas.
+                </p>
+              </div>
+            </div>
+            <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+              Garantiza la regla de <strong>Cero Pérdida de Datos</strong> y consistencia matemática. Si alguna cuenta tiene discrepancia por modificaciones anteriores o transferencias, el sistema sincroniza automáticamente su saldo con la realidad contable.
+            </p>
+            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleReconcileBalances(false)}
+                disabled={isReconciling}
+              >
+                <RefreshCw size={16} className={isReconciling ? "animate-spin" : ""} />
+                {isReconciling ? "Auditando..." : "Auditar Saldos de Cuentas"}
+              </button>
+            </div>
+
+            {/* Reconciliation Report Table */}
+            {reconciliationReport && (
+              <div style={{ marginTop: "0.5rem", borderTop: "1px solid var(--border-subtle)", paddingTop: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <h4 style={{ fontSize: "0.875rem", fontWeight: 700, margin: 0 }}>Resultado de la Auditoría Contable:</h4>
+                  {reconciliationReport.some((r: any) => !r.isReconciled) && (
+                    <button
+                      className="btn btn-outline"
+                      style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", color: "var(--color-warning)" }}
+                      onClick={() => {
+                        if (confirm("¿Estás seguro de sincronizar los saldos de las cuentas con la suma de los movimientos históricos? Esto ajustará los saldos guardados.")) {
+                          handleReconcileBalances(true);
+                        }
+                      }}
+                      disabled={isReconciling}
+                    >
+                      Sincronizar Saldos con Movimientos
+                    </button>
+                  )}
+                </div>
+                <div className="table-container" style={{ margin: 0, overflowX: "auto" }}>
+                  <table className="table" style={{ width: "100%", fontSize: "0.8125rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Cuenta</th>
+                        <th style={{ textAlign: "right" }}>Saldo Actual</th>
+                        <th style={{ textAlign: "right" }}>Suma de Movimientos</th>
+                        <th style={{ textAlign: "right" }}>Diferencia</th>
+                        <th style={{ textAlign: "center" }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconciliationReport.map((r, i) => (
+                        <tr key={i}>
+                          <td style={{ fontWeight: 600 }}>{r.accountName}</td>
+                          <td style={{ textAlign: "right" }}>${r.storedBalance.toFixed(2)}</td>
+                          <td style={{ textAlign: "right", fontWeight: 700 }}>${r.computedBalance.toFixed(2)}</td>
+                          <td style={{ textAlign: "right", color: r.difference === 0 ? "var(--text-muted)" : "var(--color-warning)" }}>
+                            {r.difference > 0 ? `+${r.difference.toFixed(2)}` : r.difference.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {r.isReconciled ? (
+                              <span className="badge badge-reconciled" style={{ fontSize: "0.7rem" }}>✅ Exacto</span>
+                            ) : (
+                              <span className="badge badge-warning" style={{ fontSize: "0.7rem" }}>⚠️ Con saldo inicial</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

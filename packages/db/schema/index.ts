@@ -71,6 +71,9 @@ export const accounts = pgTable("accounts", {
   balance: decimal("balance", { precision: 15, scale: 2 }).notNull().default("0"),
   currency: text("currency").notNull().default("DOP"),
   isActive: boolean("is_active").notNull().default(true),
+  // Mixed Ownership: personal (ownerMemberId), business-dedicated (businessId), or shared/household (null)
+  ownerMemberId: text("owner_member_id").references(() => householdMembers.id),
+  businessId: text("business_id").references(() => businesses.id),
   // Credit card fields
   creditLimit: decimal("credit_limit", { precision: 15, scale: 2 }),
   availableCredit: decimal("available_credit", { precision: 15, scale: 2 }),
@@ -120,6 +123,10 @@ export const transactions = pgTable("transactions", {
   recurringConfig: jsonb("recurring_config"),
   status: transactionStatusEnum("status").notNull().default("cleared"),
   toAccountId: text("to_account_id").references(() => accounts.id), // for transfers
+  // Multi-unit & Concept Tracking
+  conceptType: text("concept_type"), // 'material' | 'labor' | 'energy' | 'wear_equipment' | 'profit_draw' | 'operational_expense' | 'income_sale'
+  costBreakdown: jsonb("cost_breakdown"), // pocket allocations { material, energy, wearRisk, labor, profit }
+  quoteId: text("quote_id"), // linked businessQuote
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -150,6 +157,54 @@ export const businessTransactions = pgTable("business_transactions", {
   date: timestamp("date", { withTimezone: true }).notNull(),
   memberId: text("member_id").references(() => householdMembers.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const businessCatalogItems = pgTable("business_catalog_items", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  businessId: text("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  itemType: text("item_type").notNull(), // 'material' | 'labor' | 'energy' | 'machine' | 'service' | 'addon'
+  unit: text("unit").notNull(), // 'gramos' | 'horas' | 'unidades' | 'rollo' | 'resma' | 'copia'
+  unitCost: decimal("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+  defaultPrice: decimal("default_price", { precision: 15, scale: 2 }),
+  currency: text("currency").notNull().default("DOP"),
+  metadata: jsonb("metadata"), // Details: machine purchase cost, lifespan, wattage, courier, etc.
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const businessQuotes = pgTable("business_quotes", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  businessId: text("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  memberId: text("member_id").references(() => householdMembers.id),
+  accountId: text("account_id").references(() => accounts.id),
+  clientName: text("client_name").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  templateType: text("template_type").notNull().default("3d_print"), // '3d_print' | 'copy_service' | 'custom' | 'hourly'
+  deliveryTime: text("delivery_time"),
+  paymentMethod: text("payment_method"),
+  currency: text("currency").notNull().default("DOP"),
+  lineItems: jsonb("line_items"),
+  materialTotal: decimal("material_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  energyTotal: decimal("energy_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  wearRiskTotal: decimal("wear_risk_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  laborTotal: decimal("labor_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  overheadTotal: decimal("overhead_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  profitTotal: decimal("profit_total", { precision: 15, scale: 2 }).notNull().default("0"),
+  totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  paymentStatus: text("payment_status").notNull().default("quote"), // 'quote' | 'pending' | 'partial' | 'paid'
+  paidPercentage: decimal("paid_percentage", { precision: 5, scale: 2 }).notNull().default("0"),
+  paidAmount: decimal("paid_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  remainingAmount: decimal("remaining_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  date: timestamp("date", { withTimezone: true }).notNull().defaultNow(),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
@@ -259,6 +314,8 @@ export const householdsRelations = relations(households, ({ many }) => ({
   categories: many(categories),
   transactions: many(transactions),
   businesses: many(businesses),
+  catalogItems: many(businessCatalogItems),
+  quotes: many(businessQuotes),
   projects: many(projects),
   loans: many(loans),
   reconciliationEntries: many(reconciliationEntries),
@@ -271,8 +328,10 @@ export const householdMembersRelations = relations(householdMembers, ({ one, man
     references: [households.id],
   }),
   incomeSources: many(memberIncomeSources),
+  ownedAccounts: many(accounts),
   transactions: many(transactions),
   businessTransactions: many(businessTransactions),
+  quotes: many(businessQuotes),
   projects: many(projects),
   loansAsLender: many(loans, { relationName: "lender" }),
   loansAsBorrower: many(loans, { relationName: "borrower" }),
@@ -298,10 +357,19 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
     fields: [accounts.householdId],
     references: [households.id],
   }),
+  ownerMember: one(householdMembers, {
+    fields: [accounts.ownerMemberId],
+    references: [householdMembers.id],
+  }),
+  business: one(businesses, {
+    fields: [accounts.businessId],
+    references: [businesses.id],
+  }),
   transactions: many(transactions, { relationName: "accountTransactions" }),
   toTransactions: many(transactions, { relationName: "toAccountTransactions" }),
   loans: many(loans),
   reconciliationEntries: many(reconciliationEntries),
+  quotes: many(businessQuotes),
 }));
 
 export const categoriesRelations = relations(categories, ({ one, many }) => ({
@@ -345,6 +413,10 @@ export const transactionsRelations = relations(transactions, ({ one, many }) => 
     fields: [transactions.projectId],
     references: [projects.id],
   }),
+  quote: one(businessQuotes, {
+    fields: [transactions.quoteId],
+    references: [businessQuotes.id],
+  }),
   loanPayments: many(loanPayments),
 }));
 
@@ -355,6 +427,40 @@ export const businessesRelations = relations(businesses, ({ one, many }) => ({
   }),
   transactions: many(businessTransactions),
   projects: many(projects),
+  catalogItems: many(businessCatalogItems),
+  quotes: many(businessQuotes),
+  dedicatedAccounts: many(accounts),
+}));
+
+export const businessCatalogItemsRelations = relations(businessCatalogItems, ({ one }) => ({
+  household: one(households, {
+    fields: [businessCatalogItems.householdId],
+    references: [households.id],
+  }),
+  business: one(businesses, {
+    fields: [businessCatalogItems.businessId],
+    references: [businesses.id],
+  }),
+}));
+
+export const businessQuotesRelations = relations(businessQuotes, ({ one, many }) => ({
+  household: one(households, {
+    fields: [businessQuotes.householdId],
+    references: [households.id],
+  }),
+  business: one(businesses, {
+    fields: [businessQuotes.businessId],
+    references: [businesses.id],
+  }),
+  member: one(householdMembers, {
+    fields: [businessQuotes.memberId],
+    references: [householdMembers.id],
+  }),
+  account: one(accounts, {
+    fields: [businessQuotes.accountId],
+    references: [accounts.id],
+  }),
+  transactions: many(transactions),
 }));
 
 export const businessTransactionsRelations = relations(businessTransactions, ({ one }) => ({

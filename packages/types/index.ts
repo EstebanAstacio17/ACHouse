@@ -59,6 +59,8 @@ export type Account = {
   balance: string;
   currency: string;
   isActive: boolean;
+  ownerMemberId?: string | null;
+  businessId?: string | null;
   creditLimit: string | null;
   availableCredit: string | null;
   statementDay: number | null;
@@ -74,6 +76,16 @@ export type Account = {
 
 export type TransactionType = "income" | "expense" | "transfer";
 export type TransactionStatus = "pending" | "cleared" | "reconciled";
+
+export type ConceptType =
+  | "material"
+  | "labor"
+  | "energy"
+  | "wear_equipment"
+  | "profit_draw"
+  | "operational_expense"
+  | "income_sale"
+  | "transfer_draw";
 
 export type Transaction = {
   id: string;
@@ -95,6 +107,9 @@ export type Transaction = {
   recurringConfig: RecurringConfig | null;
   status: TransactionStatus;
   toAccountId: string | null;
+  conceptType?: string | null;
+  costBreakdown?: Record<string, any> | null;
+  quoteId?: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -123,6 +138,9 @@ export const transactionSchema = z.object({
   status: z.enum(["pending", "cleared", "reconciled"]).default("cleared"),
   isRecurring: z.boolean().default(false),
   toAccountId: z.string().optional(),
+  conceptType: z.string().optional(),
+  costBreakdown: z.record(z.any()).optional(),
+  quoteId: z.string().optional(),
 });
 
 // ─── Category Types ───────────────────────────────────────────────────────────
@@ -155,6 +173,100 @@ export type Business = {
   createdAt: Date;
   deletedAt: Date | null;
 };
+
+// ─── Business Catalog & Quoter Types ──────────────────────────────────────────
+
+export type CatalogItemType = "material" | "labor" | "energy" | "machine" | "service" | "addon";
+
+export type BusinessCatalogItem = {
+  id: string;
+  householdId: string;
+  businessId: string;
+  name: string;
+  itemType: CatalogItemType;
+  unit: string;
+  unitCost: string;
+  defaultPrice: string | null;
+  currency: string;
+  metadata: Record<string, any> | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export const businessCatalogItemSchema = z.object({
+  businessId: z.string().min(1),
+  name: z.string().min(1).max(100),
+  itemType: z.enum(["material", "labor", "energy", "machine", "service", "addon"]),
+  unit: z.string().min(1).max(30),
+  unitCost: z.coerce.number().min(0).default(0),
+  defaultPrice: z.coerce.number().optional(),
+  currency: z.string().length(3).default("DOP"),
+  metadata: z.record(z.any()).optional(),
+  isActive: z.boolean().default(true),
+});
+
+export type QuoteTemplateType = "3d_print" | "copy_service" | "hourly" | "custom";
+export type QuotePaymentStatus = "quote" | "pending" | "partial" | "paid";
+
+export type BusinessQuote = {
+  id: string;
+  householdId: string;
+  businessId: string;
+  memberId: string | null;
+  accountId: string | null;
+  clientName: string;
+  title: string;
+  description: string | null;
+  templateType: QuoteTemplateType;
+  deliveryTime: string | null;
+  paymentMethod: string | null;
+  currency: string;
+  lineItems: any;
+  materialTotal: string;
+  energyTotal: string;
+  wearRiskTotal: string;
+  laborTotal: string;
+  overheadTotal: string;
+  profitTotal: string;
+  totalAmount: string;
+  paymentStatus: QuotePaymentStatus;
+  paidPercentage: string;
+  paidAmount: string;
+  remainingAmount: string;
+  date: Date;
+  dueDate: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+};
+
+export const businessQuoteSchema = z.object({
+  businessId: z.string().min(1),
+  memberId: z.string().optional(),
+  accountId: z.string().optional(),
+  clientName: z.string().min(1).max(100),
+  title: z.string().min(1).max(150),
+  description: z.string().optional(),
+  templateType: z.enum(["3d_print", "copy_service", "hourly", "custom"]).default("3d_print"),
+  deliveryTime: z.string().optional(),
+  paymentMethod: z.string().optional(),
+  currency: z.string().length(3).default("DOP"),
+  lineItems: z.any().optional(),
+  materialTotal: z.coerce.number().min(0).default(0),
+  energyTotal: z.coerce.number().min(0).default(0),
+  wearRiskTotal: z.coerce.number().min(0).default(0),
+  laborTotal: z.coerce.number().min(0).default(0),
+  overheadTotal: z.coerce.number().min(0).default(0),
+  profitTotal: z.coerce.number().min(0).default(0),
+  totalAmount: z.coerce.number().min(0),
+  paymentStatus: z.enum(["quote", "pending", "partial", "paid"]).default("quote"),
+  paidPercentage: z.coerce.number().min(0).max(100).default(0),
+  paidAmount: z.coerce.number().min(0).default(0),
+  remainingAmount: z.coerce.number().min(0).default(0),
+  date: z.string().optional(),
+  dueDate: z.string().optional(),
+});
 
 // ─── Project Types ────────────────────────────────────────────────────────────
 

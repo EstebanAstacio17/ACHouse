@@ -43,7 +43,7 @@ export function ReportsClient() {
       try {
         setLoading(true);
         const [txs, accs] = await Promise.all([
-          getTransactions({ perPage: 100 }),
+          getTransactions({ perPage: 0 }),
           getAccounts(),
         ]);
         setTransactions(txs);

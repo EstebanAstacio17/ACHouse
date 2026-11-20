@@ -20,8 +20,8 @@ const isPublicRoute = createRouteMatcher([
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 const isInviteRoute = createRouteMatcher(["/invite(.*)"]);
 
-// When valid Clerk keys are configured, protect routes with Clerk
-const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
+// Resilient middleware that doesn't crash during local dev before Clerk keys are configured
+export default clerkMiddleware(async (auth, req: NextRequest) => {
   const { userId, sessionClaims } = await auth();
 
   if (isPublicRoute(req)) {
@@ -49,14 +49,6 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
 
   return NextResponse.next();
 });
-
-// Resilient middleware that doesn't crash during local dev before Clerk keys are configured
-export default function middleware(req: NextRequest) {
-  if (hasValidClerkKey) {
-    return (clerkHandler as any)(req);
-  }
-  return NextResponse.next();
-}
 
 export const config = {
   matcher: [

@@ -30,6 +30,7 @@ export interface LoanItem {
   startDate: Date;
   endDate: Date;
   currency: string;
+  isActive?: boolean;
 }
 
 export interface CreditCardItem {
@@ -691,6 +692,7 @@ export function LoansClient() {
           startDate: new Date(l.startDate),
           endDate: l.endDate ? new Date(l.endDate) : new Date(l.startDate),
           currency: l.currency ?? "USD",
+          isActive: l.isActive !== false,
         }))
       );
 
@@ -698,17 +700,19 @@ export function LoansClient() {
       setCards(
         creditAccounts.map((c: any) => {
           const limit = parseFloat(c.creditLimit ?? "5000");
-          const bal = parseFloat(c.balance ?? "0");
+          const rawBal = parseFloat(c.balance ?? "0");
+          // Para tarjetas de crédito, un saldo negativo en contabilidad representa deuda adeudada
+          const debt = rawBal < 0 ? Math.abs(rawBal) : (rawBal > 0 ? rawBal : 0);
           return {
             id: c.id,
             name: c.name,
-            balance: bal,
+            balance: debt,
             creditLimit: limit,
-            availableCredit: parseFloat(c.availableCredit ?? String(Math.max(0, limit - bal))),
+            availableCredit: parseFloat(c.availableCredit ?? String(Math.max(0, limit - debt))),
             statementDay: c.statementDay ?? 15,
             paymentDueDay: c.paymentDueDay ?? 25,
             minimumPayment: parseFloat(c.minimumPayment ?? "50"),
-            currency: c.currency ?? "USD",
+            currency: c.currency ?? "DOP",
           };
         })
       );
@@ -739,7 +743,19 @@ export function LoansClient() {
     return formatMoney(n, currency);
   };
 
-  const totalLoanDebt = loans.reduce((sum, l) => sum + l.remainingBalance, 0);
+  const [loanStatusFilter, setLoanStatusFilter] = useState<"active" | "settled">("active");
+
+  const activeLoans = useMemo(() => {
+    return loans.filter(l => l.remainingBalance > 0.01 && l.isActive !== false);
+  }, [loans]);
+
+  const settledLoans = useMemo(() => {
+    return loans.filter(l => l.remainingBalance <= 0.01 || l.isActive === false);
+  }, [loans]);
+
+  const displayedLoans = loanStatusFilter === "active" ? activeLoans : settledLoans;
+
+  const totalLoanDebt = activeLoans.reduce((sum, l) => sum + l.remainingBalance, 0);
   const totalCardDebt = cards.reduce((sum, c) => sum + c.balance, 0);
   const totalCombinedDebt = totalLoanDebt + totalCardDebt;
 
@@ -826,20 +842,25 @@ export function LoansClient() {
 
   const handlePayLoan = async (loanId: string, amount: number, accountId: string) => {
     try {
+      const loan = loans.find(l => l.id === loanId);
+      const isSettling = loan ? (loan.remainingBalance - amount <= 0.01) : false;
+
       await registerLoanPayment(loanId, {
         amount,
         principalPaid: amount,
         interestPaid: 0,
         date: new Date().toISOString().split("T")[0],
-        notes: "Abono cuota préstamo",
+        notes: isSettling ? "Pago final - Préstamo saldado" : "Abono cuota préstamo",
       });
 
       if (accountId) {
+        const loanDesc = loan ? `${loan.name}${loan.lenderName ? ` (${loan.lenderName})` : ""}` : "Préstamo";
         const txRes = await createTransaction({
           accountId,
           type: "expense",
           amount,
-          description: "Pago cuota de préstamo",
+          description: `Pago Préstamo: ${loanDesc}`,
+          conceptType: "loan_payment",
           date: new Date().toISOString().split("T")[0],
         });
         if (txRes && !txRes.success) {
@@ -847,7 +868,11 @@ export function LoansClient() {
         }
       }
 
-      toast.success(`Abono de $${amount.toFixed(2)} registrado al préstamo`);
+      if (isSettling) {
+        toast.success(`¡Préstamo "${loan?.name}" saldado por completo! Ha sido retirado de préstamos activos.`);
+      } else {
+        toast.success(`Abono de RD$ ${amount.toLocaleString("es-DO", { minimumFractionDigits: 2 })} registrado al préstamo`);
+      }
       await loadData();
     } catch (err: any) {
       toast.error(err.message || "Error al procesar pago");
@@ -856,27 +881,25 @@ export function LoansClient() {
 
   const handlePayCard = async (cardId: string, amount: number, accountId: string) => {
     try {
+      const card = cards.find(c => c.id === cardId);
+      if (!card) throw new Error("Tarjeta no encontrada");
+
       if (accountId) {
         const txRes = await createTransaction({
           accountId,
-          type: "expense",
+          toAccountId: cardId,
+          type: "transfer",
           amount,
-          description: "Pago a tarjeta de crédito",
+          description: `Pago Tarjeta: ${card.name}`,
+          conceptType: "card_payment",
           date: new Date().toISOString().split("T")[0],
         });
         if (txRes && !txRes.success) {
-          throw new Error(txRes.error || "Error al registrar la transacción de tarjeta");
+          throw new Error(txRes.error || "Error al registrar la transferencia a la tarjeta");
         }
       }
 
-      const card = cards.find(c => c.id === cardId);
-      if (card) {
-        await updateAccount(cardId, {
-          balance: Math.max(0, card.balance - amount),
-        });
-      }
-
-      toast.success(`Pago de $${amount.toFixed(2)} aplicado a la tarjeta`);
+      toast.success(`Pago de RD$ ${amount.toLocaleString("es-DO", { minimumFractionDigits: 2 })} transferido a ${card.name}`);
       await loadData();
     } catch (err: any) {
       toast.error(err.message || "Error al pagar tarjeta");
@@ -983,7 +1006,7 @@ export function LoansClient() {
             onClick={() => setTab("loans")}
             className={`btn ${tab === "loans" ? "btn-primary" : "btn-ghost"}`}
           >
-            <Banknote size={16} /> Préstamos y Deudas ({loans.length})
+            <Banknote size={16} /> Préstamos y Deudas ({activeLoans.length})
           </button>
           <button
             onClick={() => setTab("cards")}
@@ -995,90 +1018,167 @@ export function LoansClient() {
 
         {/* Tab 1: Loans */}
         {tab === "loans" && (
-          loans.length === 0 ? (
-            <div className="card empty-state">
-              <div className="empty-state-icon">🏦</div>
-              <p className="empty-state-title">No hay préstamos registrados</p>
-              <p className="empty-state-desc">Registra tus préstamos bancarios o deudas entre integrantes para seguir su amortización.</p>
-              <button className="btn btn-primary btn-sm" onClick={() => { setEditingLoan(null); setShowNewLoanModal(true); }}>
-                <Plus size={14} /> Registrar Primer Préstamo
-              </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            {/* Sub-filtros: Activos vs Saldados */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+              <div style={{ display: "flex", gap: "0.375rem", background: "var(--bg-active)", padding: "0.25rem", borderRadius: "var(--radius-md)" }}>
+                <button
+                  type="button"
+                  onClick={() => setLoanStatusFilter("active")}
+                  className={`btn btn-sm ${loanStatusFilter === "active" ? "btn-primary" : "btn-ghost"}`}
+                  style={{ fontSize: "0.8125rem", padding: "0.35rem 0.75rem" }}
+                >
+                  Activos ({activeLoans.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanStatusFilter("settled")}
+                  className={`btn btn-sm ${loanStatusFilter === "settled" ? "btn-primary" : "btn-ghost"}`}
+                  style={{ fontSize: "0.8125rem", padding: "0.35rem 0.75rem" }}
+                >
+                  <CheckCircle2 size={13} /> Saldados ({settledLoans.length})
+                </button>
+              </div>
+              <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                {loanStatusFilter === "active"
+                  ? "Mostrando únicamente préstamos con deuda pendiente de saldar"
+                  : "Préstamos finalizados (saldo RD$ 0.00)"}
+              </span>
             </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.25rem" }}>
-              {loans.map(loan => {
-                const paid = loan.principalAmount - loan.remainingBalance;
-                const pct = loan.principalAmount > 0 ? (paid / loan.principalAmount) * 100 : 0;
 
-                return (
-                  <div key={loan.id} className="card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            {displayedLoans.length === 0 ? (
+              <div className="card empty-state">
+                <div className="empty-state-icon">{loanStatusFilter === "active" ? "🎉" : "📋"}</div>
+                <p className="empty-state-title">
+                  {loanStatusFilter === "active"
+                    ? "¡No tienes préstamos pendientes de pago!"
+                    : "No hay préstamos saldados archivados"}
+                </p>
+                <p className="empty-state-desc">
+                  {loanStatusFilter === "active"
+                    ? "Todos tus préstamos están al día o saldados a RD$ 0.00. Los préstamos saldados se archivan en la pestaña 'Saldados'."
+                    : "Cuando un préstamo llega a balance RD$ 0.00 se archiva automáticamente aquí."}
+                </p>
+                {loanStatusFilter === "active" && (
+                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingLoan(null); setShowNewLoanModal(true); }}>
+                    <Plus size={14} /> Registrar Primer Préstamo
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "1.25rem" }}>
+                {displayedLoans.map(loan => {
+                  const isSettled = loan.remainingBalance <= 0.01 || loan.isActive === false;
+                  const paid = loan.principalAmount - loan.remainingBalance;
+                  const pct = loan.principalAmount > 0 ? (paid / loan.principalAmount) * 100 : 100;
+
+                  return (
+                    <div
+                      key={loan.id}
+                      className="card"
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "1.25rem",
+                        opacity: isSettled ? 0.88 : 1,
+                        border: isSettled ? "1px solid rgba(22, 163, 74, 0.35)" : undefined,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, letterSpacing: "-0.01em" }}>{loan.name}</h3>
+                            {isSettled && (
+                              <span
+                                className="badge"
+                                style={{
+                                  background: "rgba(22, 163, 74, 0.15)",
+                                  color: "var(--color-income)",
+                                  fontWeight: 700,
+                                  fontSize: "0.6875rem",
+                                }}
+                              >
+                                <CheckCircle2 size={11} style={{ display: "inline", marginRight: 3 }} /> Saldado
+                              </span>
+                            )}
+                          </div>
+                          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                            {loan.lenderType === "internal_member"
+                              ? `De ${loan.lenderName} a ${loan.borrowerName}`
+                              : loan.lenderName || "Préstamo"}
+                          </p>
+                        </div>
+                        <span className="badge" style={{ background: "var(--accent-subtle)", color: "var(--accent)" }}>
+                          {loan.interestRate > 0 ? `${loan.interestRate}% anual` : "Sin interés"}
+                        </span>
+                      </div>
+
+                      {/* Progress */}
                       <div>
-                        <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, letterSpacing: "-0.01em" }}>{loan.name}</h3>
-                        <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                          {loan.lenderType === "internal_member"
-                            ? `De ${loan.lenderName} a ${loan.borrowerName}`
-                            : loan.lenderName || "Préstamo"}
-                        </p>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", marginBottom: "0.375rem" }}>
+                          <span style={{ color: "var(--text-secondary)" }}>Pagado: <strong style={{ color: "var(--text-primary)" }}>{fmt(paid, loan.currency)}</strong></span>
+                          <span style={{ fontWeight: 700, color: isSettled ? "var(--color-income)" : "var(--color-expense)" }}>
+                            Resta: {fmt(loan.remainingBalance, loan.currency)}
+                          </span>
+                        </div>
+                        <div className="progress-bar">
+                          <div
+                            className="progress-fill"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, pct))}%`,
+                              background: isSettled
+                                ? "linear-gradient(90deg, #16a34a 0%, #22c55e 100%)"
+                                : "linear-gradient(90deg, #16a34a 0%, var(--color-income) 100%)",
+                            }}
+                          />
+                        </div>
                       </div>
-                      <span className="badge" style={{ background: "var(--accent-subtle)", color: "var(--accent)" }}>
-                        {loan.interestRate > 0 ? `${loan.interestRate}% anual` : "Sin interés"}
-                      </span>
-                    </div>
 
-                    {/* Progress */}
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", marginBottom: "0.375rem" }}>
-                        <span style={{ color: "var(--text-secondary)" }}>Pagado: <strong style={{ color: "var(--text-primary)" }}>{fmt(paid, loan.currency)}</strong></span>
-                        <span style={{ fontWeight: 700, color: "var(--color-expense)" }}>Resta: {fmt(loan.remainingBalance, loan.currency)}</span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: "linear-gradient(90deg, #16a34a 0%, var(--color-income) 100%)" }} />
-                      </div>
-                    </div>
-
-                    {/* Monthly payment indicator & Action buttons */}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "0.75rem", borderTop: "1px solid var(--border-hair)" }}>
-                      <div>
-                        <p style={{ fontSize: "0.6875rem", color: "var(--text-tertiary)", textTransform: "uppercase" }}>Cuota Mensual</p>
-                        <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-primary)" }}>{fmt(loan.monthlyPayment, loan.currency)}</p>
-                      </div>
-                      <div style={{ display: "flex", gap: "0.375rem" }}>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => setAmortizationLoan(loan)}
-                          title="Ver tabla de amortización"
-                        >
-                          <FileSpreadsheet size={13} /> Tabla
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-icon btn-sm"
-                          onClick={() => setEditingLoan(loan)}
-                          title="Editar préstamo"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => setPayingLoan(loan)}
-                        >
-                          Pagar Cuota
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon btn-sm"
-                          style={{ color: "var(--color-expense)" }}
-                          onClick={() => handleDeleteLoan(loan.id, loan.name)}
-                          title="Eliminar préstamo"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                      {/* Monthly payment indicator & Action buttons */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "0.75rem", borderTop: "1px solid var(--border-hair)" }}>
+                        <div>
+                          <p style={{ fontSize: "0.6875rem", color: "var(--text-tertiary)", textTransform: "uppercase" }}>Cuota Mensual</p>
+                          <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-primary)" }}>{fmt(loan.monthlyPayment, loan.currency)}</p>
+                        </div>
+                        <div style={{ display: "flex", gap: "0.375rem" }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setAmortizationLoan(loan)}
+                            title="Ver tabla de amortización"
+                          >
+                            <FileSpreadsheet size={13} /> Tabla
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-icon btn-sm"
+                            onClick={() => setEditingLoan(loan)}
+                            title="Editar préstamo"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          {!isSettled && (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => setPayingLoan(loan)}
+                            >
+                              Pagar Cuota
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            style={{ color: "var(--color-expense)" }}
+                            onClick={() => handleDeleteLoan(loan.id, loan.name)}
+                            title="Eliminar préstamo"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Tab 2: Credit Cards */}

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import {
   Plus, Building2, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2,
   X, Check, ExternalLink, ArrowUpCircle, ArrowDownCircle, Percent, Users, User,
-  Clock, CheckCircle2, AlertCircle
+  Clock, CheckCircle2, AlertCircle, Calculator, Wallet
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/components/ui/ToastContext";
@@ -13,6 +13,7 @@ import { getMembers, getAccounts } from "@/lib/actions/entities";
 import { confirmPendingTransaction } from "@/lib/actions/transactions";
 import { formatMoney } from "@/lib/geo";
 import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
+import { BusinessQuoterModal } from "./BusinessQuoterModal";
 
 export interface BusinessItem {
   id: string;
@@ -40,6 +41,23 @@ export interface BusinessItem {
   monthlyData: Array<{ month: string; income: number; expenses: number; pendingIncome?: number }>;
   members?: Array<{ id: string; displayName: string; role: string; avatarUrl?: string | null }>;
   memberIds?: string[];
+  pockets?: {
+    material: number;
+    energy: number;
+    wearRisk: number;
+    labor: number;
+    profitDraw: number;
+    overhead: number;
+  };
+  memberBreakdown?: Array<{
+    memberId: string;
+    name: string;
+    avatarUrl?: string | null;
+    income: number;
+    expenses: number;
+    net: number;
+    count: number;
+  }>;
 }
 
 export interface MemberOption {
@@ -346,17 +364,19 @@ export function BusinessesClient() {
   const [accountsList, setAccountsList] = useState<Array<{ id: string; name: string; currency?: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingBiz, setEditingBiz] = useState<BusinessItem | null>(null);
+  const [quotingBiz, setQuotingBiz] = useState<BusinessItem | null>(null);
   const [confirmingTx, setConfirmingTx] = useState<{ id: string; description: string; amount: string; currency: string; accountId?: string } | null>(null);
 
   const fetchData = async () => {
     try {
-      const [bizData, membersData, accsData] = await Promise.all([
+      const [bizRes, membersRes, accsRes] = await Promise.allSettled([
         getBusinesses(),
         getMembers(),
         getAccounts(),
       ]);
 
-      if (bizData) {
+      if (bizRes.status === "fulfilled" && bizRes.value) {
+        const bizData = bizRes.value;
         setBusinesses(
           bizData.map((b: any) => ({
             id: b.id,
@@ -377,11 +397,16 @@ export function BusinessesClient() {
             monthlyData: b.monthlyData || [],
             members: b.members || [],
             memberIds: b.memberIds || [],
+            pockets: b.pockets || { material: 0, energy: 0, wearRisk: 0, labor: 0, profitDraw: 0, overhead: 0 },
+            memberBreakdown: b.memberBreakdown || [],
           }))
         );
+      } else if (bizRes.status === "rejected") {
+        console.error("Error loading businesses:", bizRes.reason);
       }
 
-      if (membersData) {
+      if (membersRes.status === "fulfilled" && membersRes.value) {
+        const membersData = membersRes.value;
         setAvailableMembers(
           membersData.map((m: any) => ({
             id: m.id,
@@ -392,7 +417,8 @@ export function BusinessesClient() {
         );
       }
 
-      if (accsData) {
+      if (accsRes.status === "fulfilled" && accsRes.value) {
+        const accsData = accsRes.value;
         setAccountsList(accsData.map((a: any) => ({ id: a.id, name: a.name, currency: a.currency })));
       }
     } catch (err) {
@@ -597,7 +623,15 @@ export function BusinessesClient() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: "0.25rem" }}>
+                    <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        style={{ fontSize: "0.75rem", padding: "0.3rem 0.6rem", display: "flex", alignItems: "center", gap: "0.35rem" }}
+                        onClick={() => setQuotingBiz(b)}
+                        title="Cotizador inteligente y catálogo de insumos"
+                      >
+                        <Calculator size={13} /> Cotizar
+                      </button>
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
                         onClick={() => { setEditingBiz(b); setShowModal(true); }}
@@ -763,6 +797,57 @@ export function BusinessesClient() {
                     </div>
                   </div>
 
+                  {/* Concept Pockets (Bolsillos Contables) */}
+                  {b.pockets && (
+                    <div style={{ background: "var(--bg-card-alt)", padding: "0.75rem", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.75rem", fontWeight: 700, display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                          <Wallet size={13} color="var(--accent)" /> Bolsillos Contables (Pockets)
+                        </span>
+                        <span style={{ fontSize: "0.6875rem", color: "var(--text-muted)" }}>Acumulado</span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0.5rem", fontSize: "0.7rem" }}>
+                        <div style={{ padding: "0.35rem 0.5rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                          <span style={{ color: "var(--text-secondary)", display: "block" }}>Insumos</span>
+                          <strong style={{ color: "var(--text-primary)" }}>{fmt(b.pockets.material, b.currency)}</strong>
+                        </div>
+                        <div style={{ padding: "0.35rem 0.5rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                          <span style={{ color: "var(--text-secondary)", display: "block" }}>Energía</span>
+                          <strong style={{ color: "var(--color-warning)" }}>{fmt(b.pockets.energy, b.currency)}</strong>
+                        </div>
+                        <div style={{ padding: "0.35rem 0.5rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                          <span style={{ color: "var(--text-secondary)", display: "block" }}>Desgaste</span>
+                          <strong style={{ color: "var(--color-expense)" }}>{fmt(b.pockets.wearRisk, b.currency)}</strong>
+                        </div>
+                        <div style={{ padding: "0.35rem 0.5rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                          <span style={{ color: "var(--text-secondary)", display: "block" }}>Mano Obra</span>
+                          <strong style={{ color: "var(--color-income)" }}>{fmt(b.pockets.labor, b.currency)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Member Breakdown */}
+                  {b.memberBreakdown && b.memberBreakdown.length > 0 && (
+                    <div style={{ background: "var(--surface-2)", padding: "0.625rem 0.75rem", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                      <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase" }}>
+                        Flujo por Integrante
+                      </span>
+                      {b.memberBreakdown.map(mem => (
+                        <div key={mem.memberId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.75rem" }}>
+                          <span style={{ fontWeight: 600 }}>{mem.name}</span>
+                          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                            <span style={{ color: "var(--color-income)" }}>+{fmt(mem.income, b.currency)}</span>
+                            <span style={{ color: "var(--color-expense)" }}>-{fmt(mem.expenses, b.currency)}</span>
+                            <span style={{ fontWeight: 700, color: mem.net >= 0 ? "var(--color-income)" : "var(--color-expense)" }}>
+                              ({fmt(mem.net, b.currency)})
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Quick Transaction Actions */}
                   <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
                     <a
@@ -784,6 +869,17 @@ export function BusinessesClient() {
               );
             })}
           </div>
+        )}
+
+        {/* Business Quoter & Catalog Modal */}
+        {quotingBiz && (
+          <BusinessQuoterModal
+            business={quotingBiz}
+            accountsList={accountsList}
+            availableMembers={availableMembers}
+            onClose={() => setQuotingBiz(null)}
+            onRefresh={fetchData}
+          />
         )}
       </div>
     </>

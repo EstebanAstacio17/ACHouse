@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check, TrendingUp, TrendingDown, AlertCircle, ShieldCheck } from "lucide-react";
+import { Plus, CreditCard, Wallet, PiggyBank, Banknote, Pencil, Trash2, X, Check, TrendingUp, TrendingDown, AlertCircle, ShieldCheck, User, Building2 } from "lucide-react";
 import { useToast } from "@/components/ui/ToastContext";
-import { getAccounts, createAccount, updateAccount, deleteAccount } from "@/lib/actions/entities";
+import { getAccounts, createAccount, updateAccount, deleteAccount, getMembers } from "@/lib/actions/entities";
+import { getBusinesses } from "@/lib/actions/businesses-projects-loans";
 import { CURRENCIES, formatMoney } from "@/lib/geo";
 import { useSafeBackdropClose } from "@/lib/useSafeBackdropClose";
 
@@ -19,6 +20,10 @@ export interface AccountItem {
   statementDay?: number | null;
   paymentDueDay?: number | null;
   minimumPayment?: string | null;
+  ownerMemberId?: string | null;
+  businessId?: string | null;
+  ownerMember?: { id: string; displayName: string } | null;
+  business?: { id: string; name: string } | null;
 }
 
 const ACCOUNT_TYPES = {
@@ -34,10 +39,14 @@ function AccountModal({
   onClose,
   onSave,
   initialData,
+  membersList = [],
+  businessesList = [],
 }: {
   onClose: () => void;
   onSave: (acc: Partial<AccountItem>) => void;
   initialData?: AccountItem | null;
+  membersList?: Array<{ id: string; displayName: string }>;
+  businessesList?: Array<{ id: string; name: string }>;
 }) {
   const safeBackdrop = useSafeBackdropClose(onClose);
   const [type, setType] = useState(initialData?.type ?? "checking");
@@ -49,6 +58,8 @@ function AccountModal({
     statementDay: initialData?.statementDay ? String(initialData.statementDay) : "",
     paymentDueDay: initialData?.paymentDueDay ? String(initialData.paymentDueDay) : "",
     minimumPayment: initialData?.minimumPayment ?? "",
+    ownerMemberId: initialData?.ownerMemberId ?? (initialData?.ownerMember?.id ?? ""),
+    businessId: initialData?.businessId ?? (initialData?.business?.id ?? ""),
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -64,6 +75,8 @@ function AccountModal({
       balance: form.balance,
       currency: form.currency,
       isActive: true,
+      ownerMemberId: form.ownerMemberId || undefined,
+      businessId: form.businessId || undefined,
       creditLimit: type === "credit" && form.creditLimit ? form.creditLimit : undefined,
       statementDay: type === "credit" && form.statementDay ? parseInt(form.statementDay) : undefined,
       paymentDueDay: type === "credit" && form.paymentDueDay ? parseInt(form.paymentDueDay) : undefined,
@@ -148,6 +161,42 @@ function AccountModal({
               </div>
             </div>
 
+            {/* Ownership: Member or Business */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              <div className="form-group">
+                <label className="label">
+                  <User size={12} style={{ display: "inline", marginRight: 4 }} />
+                  Titular Personal (Opcional)
+                </label>
+                <select
+                  className="input"
+                  value={form.ownerMemberId}
+                  onChange={e => set("ownerMemberId", e.target.value)}
+                >
+                  <option value="">(Ninguno / Compartida Hogar)</option>
+                  {membersList.map(m => (
+                    <option key={m.id} value={m.id}>{m.displayName}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="label">
+                  <Building2 size={12} style={{ display: "inline", marginRight: 4 }} />
+                  Empresa / Negocio (Opcional)
+                </label>
+                <select
+                  className="input"
+                  value={form.businessId}
+                  onChange={e => set("businessId", e.target.value)}
+                >
+                  <option value="">(Ninguno / No dedicada)</option>
+                  {businessesList.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {type === "credit" && (
               <>
                 <div className="divider" />
@@ -218,27 +267,44 @@ function AccountModal({
 export function AccountsClient() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountItem[]>(INITIAL_ACCOUNTS);
+  const [membersList, setMembersList] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [businessesList, setBusinessesList] = useState<Array<{ id: string; name: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
 
   useEffect(() => {
     let active = true;
-    getAccounts()
-      .then((data) => {
-        if (active && data) {
+    Promise.all([
+      getAccounts(),
+      getMembers(),
+      getBusinesses(),
+    ])
+      .then(([accsData, memsData, bizsData]) => {
+        if (!active) return;
+        if (memsData) {
+          setMembersList(memsData.map((m: any) => ({ id: m.id, displayName: m.displayName })));
+        }
+        if (bizsData) {
+          setBusinessesList(bizsData.map((b: any) => ({ id: b.id, name: b.name })));
+        }
+        if (accsData) {
           setAccounts(
-            data.map((a: any) => ({
+            accsData.map((a: any) => ({
               id: a.id,
               name: a.name,
               type: a.type,
               balance: String(a.balance ?? "0"),
-              currency: a.currency ?? "USD",
+              currency: a.currency ?? "DOP",
               isActive: a.isActive ?? true,
               creditLimit: a.creditLimit ? String(a.creditLimit) : null,
               availableCredit: a.availableCredit ? String(a.availableCredit) : null,
               statementDay: a.statementDay,
               paymentDueDay: a.paymentDueDay,
               minimumPayment: a.minimumPayment ? String(a.minimumPayment) : null,
+              ownerMemberId: a.ownerMemberId || null,
+              businessId: a.businessId || null,
+              ownerMember: a.ownerMember ? { id: a.ownerMember.id, displayName: a.ownerMember.displayName } : null,
+              business: a.business ? { id: a.business.id, name: a.business.name } : null,
             }))
           );
         }
@@ -269,25 +335,38 @@ export function AccountsClient() {
           type: saved.type as any,
           balance: saved.balance !== undefined ? parseFloat(saved.balance) : undefined,
           currency: saved.currency,
+          ownerMemberId: saved.ownerMemberId,
+          businessId: saved.businessId,
           creditLimit: saved.creditLimit ? parseFloat(saved.creditLimit) : undefined,
           statementDay: saved.statementDay ? Number(saved.statementDay) : undefined,
           paymentDueDay: saved.paymentDueDay ? Number(saved.paymentDueDay) : undefined,
           minimumPayment: saved.minimumPayment ? parseFloat(saved.minimumPayment) : undefined,
         });
-        setAccounts(prev => prev.map(a => a.id === saved.id ? { ...a, ...saved } as AccountItem : a));
+        const memObj = membersList.find(m => m.id === saved.ownerMemberId);
+        const bizObj = businessesList.find(b => b.id === saved.businessId);
+        setAccounts(prev => prev.map(a => a.id === saved.id ? {
+          ...a,
+          ...saved,
+          ownerMember: memObj || null,
+          business: bizObj || null,
+        } as AccountItem : a));
         toast.success("Cuenta actualizada exitosamente");
       } else {
         const res = await createAccount({
           name: saved.name!,
           type: (saved.type as any) || "checking",
           balance: saved.balance ? parseFloat(saved.balance) : 0,
-          currency: saved.currency || "USD",
+          currency: saved.currency || "DOP",
+          ownerMemberId: saved.ownerMemberId,
+          businessId: saved.businessId,
           creditLimit: saved.creditLimit ? parseFloat(saved.creditLimit) : undefined,
           statementDay: saved.statementDay ? Number(saved.statementDay) : undefined,
           paymentDueDay: saved.paymentDueDay ? Number(saved.paymentDueDay) : undefined,
           minimumPayment: saved.minimumPayment ? parseFloat(saved.minimumPayment) : undefined,
         });
         const created = res.account;
+        const memObj = membersList.find(m => m.id === saved.ownerMemberId);
+        const bizObj = businessesList.find(b => b.id === saved.businessId);
         const newAcc: AccountItem = {
           id: created.id,
           name: created.name,
@@ -295,6 +374,10 @@ export function AccountsClient() {
           balance: String(created.balance),
           currency: created.currency,
           isActive: true,
+          ownerMemberId: created.ownerMemberId || null,
+          businessId: created.businessId || null,
+          ownerMember: memObj || null,
+          business: bizObj || null,
           creditLimit: created.creditLimit ? String(created.creditLimit) : null,
           availableCredit: created.availableCredit ? String(created.availableCredit) : null,
           statementDay: created.statementDay,
@@ -329,6 +412,8 @@ export function AccountsClient() {
           onClose={() => { setShowModal(false); setEditingAccount(null); }}
           onSave={handleSaveAccount}
           initialData={editingAccount}
+          membersList={membersList}
+          businessesList={businessesList}
         />
       )}
 
@@ -406,8 +491,23 @@ export function AccountsClient() {
                           <cfg.icon size={20} color={cfg.color} />
                         </div>
                         <div>
-                          <p style={{ fontWeight: 700, fontSize: "0.9375rem", letterSpacing: "-0.01em" }}>{acc.name}</p>
-                          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{cfg.label}</p>
+                          <p style={{ fontWeight: 700, fontSize: "0.9375rem", letterSpacing: "-0.01em", margin: 0 }}>{acc.name}</p>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.25rem" }}>
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{cfg.label}</span>
+                            {acc.ownerMember ? (
+                              <span className="badge badge-investment" style={{ fontSize: "0.6875rem", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                <User size={10} /> Personal: {acc.ownerMember.displayName}
+                              </span>
+                            ) : acc.business ? (
+                              <span className="badge badge-warning" style={{ fontSize: "0.6875rem", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                <Building2 size={10} /> {acc.business.name}
+                              </span>
+                            ) : (
+                              <span className="badge badge-secondary" style={{ fontSize: "0.6875rem" }}>
+                                🏠 Hogar
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: "0.25rem" }}>

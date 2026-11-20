@@ -2,7 +2,7 @@
 
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@achouse/db";
-import { categories, accounts, householdMembers, householdInvitations, businesses, memberIncomeSources, transactions } from "@achouse/db/schema";
+import { categories, accounts, householdMembers, householdInvitations, businesses, memberIncomeSources, transactions, reconciliationEntries } from "@achouse/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { revalidatePath } from "next/cache";
@@ -42,9 +42,23 @@ async function resolveBaseUrl(): Promise<string> {
 
 async function getAuthContext() {
   const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  if (!userId) throw new Error("No autenticado");
   const householdId = await getActiveHouseholdId();
-  return { userId, householdId };
+  if (!householdId) throw new Error("No hay hogar activo seleccionado");
+
+  const currentMember = await db.query.householdMembers.findFirst({
+    where: and(
+      eq(householdMembers.clerkUserId, userId),
+      eq(householdMembers.householdId, householdId),
+      eq(householdMembers.isActive, true)
+    ),
+  });
+
+  if (!currentMember) {
+    throw new Error("No tienes acceso activo a este hogar");
+  }
+
+  return { userId, householdId, currentMember, role: currentMember.role };
 }
 
 // ── Categories ───────────────────────────────────────────────────────────────
@@ -132,7 +146,10 @@ export async function getCategories() {
 }
 
 export async function createCategory(data: z.infer<typeof categorySchema>) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden crear categorías");
+  }
   const parsed = categorySchema.parse(data);
   const [cat] = await db.insert(categories).values({ ...parsed, householdId, parentId: parsed.parentId ?? null }).returning();
   revalidatePath("/dashboard/categories");
@@ -140,7 +157,10 @@ export async function createCategory(data: z.infer<typeof categorySchema>) {
 }
 
 export async function updateCategory(id: string, data: Partial<z.infer<typeof categorySchema>>) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden modificar categorías");
+  }
   const [updated] = await db
     .update(categories)
     .set(data)
@@ -159,7 +179,10 @@ export async function updateCategory(id: string, data: Partial<z.infer<typeof ca
 }
 
 export async function deleteCategory(id: string) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden eliminar categorías");
+  }
   await db
     .update(categories)
     .set({ deletedAt: new Date(), isActive: false })
@@ -181,6 +204,8 @@ const accountSchema = z.object({
   type: z.enum(["checking", "savings", "credit", "cash"]),
   balance: z.coerce.number().default(0),
   currency: z.string().length(3).default("DOP"),
+  ownerMemberId: z.string().nullable().optional(),
+  businessId: z.string().nullable().optional(),
   creditLimit: z.coerce.number().optional(),
   statementDay: z.coerce.number().min(1).max(31).optional(),
   paymentDueDay: z.coerce.number().min(1).max(31).optional(),
@@ -191,12 +216,19 @@ export async function getAccounts() {
   const { householdId } = await getAuthContext();
   return db.query.accounts.findMany({
     where: and(eq(accounts.householdId, householdId), eq(accounts.isActive, true), isNull(accounts.deletedAt)),
+    with: {
+      ownerMember: true,
+      business: true,
+    },
     orderBy: (a, { asc }) => [asc(a.type), asc(a.name)],
   });
 }
 
 export async function createAccount(data: z.infer<typeof accountSchema>) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden crear cuentas");
+  }
   const parsed = accountSchema.parse(data);
   const [acc] = await db.insert(accounts).values({
     householdId,
@@ -204,6 +236,8 @@ export async function createAccount(data: z.infer<typeof accountSchema>) {
     type: parsed.type,
     balance: parsed.balance.toString(),
     currency: parsed.currency,
+    ownerMemberId: parsed.ownerMemberId || null,
+    businessId: parsed.businessId || null,
     creditLimit: parsed.creditLimit?.toString() ?? null,
     availableCredit: parsed.creditLimit?.toString() ?? null,
     statementDay: parsed.statementDay ?? null,
@@ -216,10 +250,15 @@ export async function createAccount(data: z.infer<typeof accountSchema>) {
 }
 
 export async function updateAccount(id: string, data: Partial<z.infer<typeof accountSchema>>) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden modificar cuentas");
+  }
   await db.update(accounts).set({
     ...data,
     balance: data.balance !== undefined ? data.balance.toString() : undefined,
+    ownerMemberId: data.ownerMemberId !== undefined ? (data.ownerMemberId || null) : undefined,
+    businessId: data.businessId !== undefined ? (data.businessId || null) : undefined,
     creditLimit: data.creditLimit !== undefined ? data.creditLimit?.toString() : undefined,
     minimumPayment: data.minimumPayment !== undefined ? data.minimumPayment?.toString() : undefined,
     updatedAt: new Date(),
@@ -228,8 +267,93 @@ export async function updateAccount(id: string, data: Partial<z.infer<typeof acc
   return { success: true };
 }
 
+export async function reconcileAllAccountBalances(options?: { applyFix?: boolean }) {
+  const { householdId, role, userId } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("No tienes permisos para conciliar cuentas");
+  }
+
+  const [accList, txList] = await Promise.all([
+    db.query.accounts.findMany({
+      where: and(eq(accounts.householdId, householdId), isNull(accounts.deletedAt)),
+    }),
+    db.query.transactions.findMany({
+      where: and(
+        eq(transactions.householdId, householdId),
+        isNull(transactions.deletedAt)
+      ),
+    }),
+  ]);
+
+  const report = [];
+
+  for (const acc of accList) {
+    const currentStoredBalance = parseFloat(acc.balance || "0");
+    let computedBalance = 0;
+
+    for (const tx of txList) {
+      if (tx.status === "pending") continue;
+      const amt = parseFloat(tx.amount || "0");
+
+      if (tx.accountId === acc.id) {
+        if (tx.type === "income") {
+          computedBalance += amt;
+        } else if (tx.type === "expense") {
+          computedBalance -= amt;
+        } else if (tx.type === "transfer") {
+          computedBalance -= amt;
+        }
+      }
+
+      if (tx.type === "transfer" && tx.toAccountId === acc.id) {
+        computedBalance += amt;
+      }
+    }
+
+    const difference = computedBalance - currentStoredBalance;
+    const diffAbs = Math.abs(difference);
+
+    report.push({
+      accountId: acc.id,
+      accountName: acc.name,
+      storedBalance: currentStoredBalance,
+      computedBalance,
+      difference,
+      isReconciled: diffAbs < 0.01,
+    });
+
+    if (options?.applyFix && diffAbs >= 0.01) {
+      await db
+        .update(accounts)
+        .set({ balance: computedBalance.toFixed(2), updatedAt: new Date() })
+        .where(eq(accounts.id, acc.id));
+
+      await db.insert(reconciliationEntries).values({
+        id: createId(),
+        householdId,
+        accountId: acc.id,
+        date: new Date(),
+        expectedBalance: currentStoredBalance.toFixed(2),
+        actualBalance: computedBalance.toFixed(2),
+        difference: difference.toFixed(2),
+        notes: "Recálculo contable automático por transacciones históricas",
+        reconciledBy: userId,
+      });
+    }
+  }
+
+  if (options?.applyFix) {
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard");
+  }
+  return { success: true, report };
+}
+
 export async function deleteAccount(id: string) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role } = await getAuthContext();
+  if (role === "viewer") {
+    throw new Error("Los usuarios con rol lector no pueden eliminar cuentas");
+  }
   await db.update(accounts).set({ isActive: false, deletedAt: new Date() }).where(and(eq(accounts.id, id), eq(accounts.householdId, householdId)));
   revalidatePath("/dashboard/accounts");
   return { success: true };
@@ -439,7 +563,10 @@ export async function inviteMember(data: {
   role: "admin" | "contributor" | "viewer";
   name?: string;
 }) {
-  const { userId, householdId } = await getAuthContext();
+  const { userId, householdId, role } = await getAuthContext();
+  if (role !== "admin") {
+    throw new Error("Solo los administradores pueden invitar nuevos integrantes");
+  }
   const token = createId() + createId();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
   const cleanEmail = data.email.trim().toLowerCase();
@@ -518,7 +645,14 @@ export async function inviteMember(data: {
 }
 
 export async function removeMember(memberId: string) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role, currentMember } = await getAuthContext();
+  if (role !== "admin") {
+    throw new Error("Solo los administradores pueden eliminar integrantes");
+  }
+  if (currentMember.id === memberId) {
+    throw new Error("No puedes eliminarte a ti mismo del hogar");
+  }
+
   const member = await db.query.householdMembers.findFirst({
     where: and(eq(householdMembers.id, memberId), eq(householdMembers.householdId, householdId)),
   });
@@ -544,14 +678,20 @@ export async function removeMember(memberId: string) {
 }
 
 export async function updateMemberRole(memberId: string, role: "admin" | "contributor" | "viewer") {
-  const { householdId } = await getAuthContext();
+  const { householdId, role: callerRole } = await getAuthContext();
+  if (callerRole !== "admin") {
+    throw new Error("Solo los administradores pueden actualizar roles");
+  }
   await db.update(householdMembers).set({ role }).where(and(eq(householdMembers.id, memberId), eq(householdMembers.householdId, householdId)));
   revalidatePath("/dashboard/members");
   return { success: true };
 }
 
 export async function updateMemberDisplayName(memberId: string, displayName: string) {
-  const { householdId } = await getAuthContext();
+  const { householdId, role, currentMember } = await getAuthContext();
+  if (role !== "admin" && currentMember.id !== memberId) {
+    throw new Error("No tienes permisos para modificar el nombre de otro integrante");
+  }
   await db
     .update(householdMembers)
     .set({ displayName: displayName.trim() })
@@ -628,8 +768,8 @@ export async function addMemberIncomeSource(data: {
       data.type === "job"
         ? "Empleo / Nómina"
         : data.type === "project"
-        ? "Inversión / Proyecto"
-        : "Comercio";
+          ? "Inversión / Proyecto"
+          : "Comercio";
 
     await db.insert(businesses).values({
       id: createId(),
@@ -650,7 +790,7 @@ export async function addMemberIncomeSource(data: {
     revalidatePath("/dashboard/categories");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
-  } catch {}
+  } catch { }
 
   return { success: true, sources: createdSources };
 }
@@ -673,7 +813,7 @@ export async function deleteMemberIncomeSource(sourceId: string, memberId: strin
     revalidatePath("/dashboard/categories");
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard");
-  } catch {}
+  } catch { }
 
   return { success: true };
 }
